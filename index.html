@@ -405,7 +405,8 @@ function cellArr(v) {
 const CFG = (typeof window !== "undefined" && window.CASE_REVIEW_CONFIG) || {};
 const CASES_NAMES = (CFG.casesTableNames && CFG.casesTableNames.length) ? CFG.casesTableNames : ["Cases", "case_notes", "Case Notes", "cases"];
 const RULES_NAMES = (CFG.rulesTableNames && CFG.rulesTableNames.length) ? CFG.rulesTableNames : ["Rules", "rule_book", "Rule Book", "rules"];
-const ISSUE_FILTER = CFG.issue || "NSA";
+const PENDING_NAMES = (CFG.pendingTableNames && CFG.pendingTableNames.length) ? CFG.pendingTableNames : ["Pending Cases", "pending_cases", "Pending", "pending"];
+const ISSUE_FALLBACK = ["NSA", "VBDA", "HRA", "HHB", "SGC", "IPV", "Misinfo", "Spam", "Other"];
 
 async function findTableByNames(base, candidates) {
   // SDK: getTableList returns ITable[]; each has getName() and id
@@ -443,6 +444,10 @@ async function waitForBitableSdk(timeoutMs) {
   return false;
 }
 
+async function findTableByNamesOptional(base, names) {
+  try { return await findTableByNames(base, names); } catch (e) { return null; }
+}
+
 async function loadCorpusFromBitable() {
   const ok = await waitForBitableSdk(5000);
   if (!ok || !window.bitable || !window.bitable.base) {
@@ -453,9 +458,11 @@ async function loadCorpusFromBitable() {
     findTableByNames(base, CASES_NAMES),
     findTableByNames(base, RULES_NAMES),
   ]);
-  const [caseRecs, ruleRecs] = await Promise.all([
+  const pendingTbl = await findTableByNamesOptional(base, PENDING_NAMES);
+  const [caseRecs, ruleRecs, pendingRecs] = await Promise.all([
     loadAllRecords(casesTbl),
     loadAllRecords(rulesTbl),
+    pendingTbl ? loadAllRecords(pendingTbl) : Promise.resolve([]),
   ]);
 
   const cases = caseRecs.map(r => {
@@ -479,7 +486,7 @@ async function loadCorpusFromBitable() {
       caption_text: cellText(f["caption_text"]),
       rationale: cellText(f["rationale"]),
     };
-  }).filter(c => c.issue === ISSUE_FILTER && c.status !== "Retired");
+  }).filter(c => c.status !== "Retired");
 
   const rules = ruleRecs.map(r => {
     const f = r.fields || {};
@@ -487,15 +494,52 @@ async function loadCorpusFromBitable() {
       record_id: r.recordId || r.record_id,
       rule_name: cellText(f["rule_name"]),
       issue: cellText(f["issue"] || f["policy_area"]),
-      policy_title: cellText(f["rule_name"]),
+      policy_title: cellText(f["policy_title"] || f["rule_name"]),
       rule_description: cellText(f["plain_description"]),
       rule_text: cellText(f["plain_rule_text"]),
       examples: cellText(f["example_cases"]),
       status: cellText(f["status"]),
     };
-  }).filter(r => r.issue === ISSUE_FILTER);
+  });
 
-  return { cases, rules };
+  const pending = pendingRecs.map(r => {
+    const f = r.fields || {};
+    return {
+      record_id: r.recordId || r.record_id,
+      case_id: cellText(f["case_id"]),
+      source_video_id: cellText(f["source_video_id"]),
+      issue: cellText(f["issue"] || f["policy_area"]),
+      policy_title: cellText(f["policy_title"]),
+      visual_summary: cellText(f["visual_summary"]),
+      asr_text: cellText(f["asr_text"]),
+      ocr_text: cellText(f["ocr_text"]),
+      caption_text: cellText(f["caption_text"]),
+      image_urls: cellArr(f["image_urls"]),
+    };
+  }).filter(p => p.case_id);
+
+  // Distinct facets for filter dropdowns
+  const issuesSet = new Set();
+  cases.forEach(c => c.issue && issuesSet.add(c.issue));
+  rules.forEach(r => r.issue && issuesSet.add(r.issue));
+  ISSUE_FALLBACK.forEach(x => issuesSet.add(x));
+  const issues = Array.from(issuesSet).sort();
+
+  const titlesByIssue = {}; // issue -> Set
+  const allTitlesSet = new Set();
+  const addTitle = (issue, t) => {
+    if (!t) return;
+    allTitlesSet.add(t);
+    const key = issue || "__any__";
+    (titlesByIssue[key] = titlesByIssue[key] || new Set()).add(t);
+  };
+  cases.forEach(c => addTitle(c.issue, c.policy_title));
+  rules.forEach(r => addTitle(r.issue, r.policy_title));
+  const titles = Array.from(allTitlesSet).sort();
+  const titlesByIssueArr = {};
+  Object.keys(titlesByIssue).forEach(k => titlesByIssueArr[k] = Array.from(titlesByIssue[k]).sort());
+
+  return { cases, rules, pending, facets: { issues, titles, titlesByIssue: titlesByIssueArr } };
 }
 
 window.__loadCorpus = loadCorpusFromBitable;
@@ -545,12 +589,13 @@ function buildIndex(cases) {
   return { docs, df, N, avgLen };
 }
 
-function score(idx, queryTokens, { issue } = {}) {
+function score(idx, queryTokens, { issue, title } = {}) {
   const { docs, df, N, avgLen } = idx;
   const k1 = 1.5, b = 0.75;
   const results = [];
   for (const d of docs) {
     if (issue && d.raw.issue !== issue) continue;
+    if (title && d.raw.policy_title !== title) continue;
     let s = 0;
     for (const q of queryTokens) {
       const n_q = df.get(q) || 0;
@@ -594,7 +639,7 @@ function rankRules(rules, queryTokens) {
 
 // ---------- Mira payload builder (V2.3) ----------
 const PAYLOAD_VERSION = "v0.3";
-const ISSUE_DEFAULT = "NSA";
+const ISSUE_DEFAULT = "";
 
 function truncStr(t, n) {
   t = (t || "").toString();
@@ -603,7 +648,7 @@ function truncStr(t, n) {
 }
 
 function buildPayload({ inputs, precedents, topRule, issue }) {
-  const issueType = issue || inputs.issue || ISSUE_DEFAULT;
+  const issueType = issue || inputs.issue || ISSUE_DEFAULT || "(any)";
   const candidate = {
     item_id: inputs.item_id || "",
     topic: inputs.topic || "",
@@ -698,7 +743,7 @@ function Thumb({ url, onRemove, idx }) {
   );
 }
 
-function InputPanel({ inputs, setInputs, onRun, loading, stats }) {
+function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOptions, pendingIds, pendingHit, onPendingPick }) {
   const setF = (k, v) => setInputs({ ...inputs, [k]: v });
   const [urlDraft, setUrlDraft] = useState("");
   const parseUrls = (raw) => {
@@ -785,13 +830,23 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats }) {
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules · retrieval: BM25 (client-side)`),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "")),
 
-      h("label", null, "Case ID / record ID (optional — pre-fills from corpus)"),
+      h("label", null, "Case ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
         type: "text", value: inputs.item_id, placeholder: "case_id or rec...",
-        onChange: e => setF("item_id", e.target.value),
+        list: "pending-case-ids",
+        onChange: e => {
+          const v = e.target.value;
+          setF("item_id", v);
+          if (typeof onPendingPick === "function") onPendingPick(v);
+        },
       }),
+      h("datalist", { id: "pending-case-ids" },
+        (pendingIds || []).map(id => h("option", { key: id, value: id })),
+      ),
+      pendingHit && h("div", { className: "hint", style: { color: "var(--primary)", fontWeight: 500 } },
+        `↳ Loaded from Pending Cases · ${pendingHit}`),
 
       h("label", null, "Visual summary"),
       h("textarea", {
@@ -872,15 +927,26 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats }) {
 
       h("div", { className: "row" },
         h("div", null,
-          h("label", null, "Issue type"),
+          h("label", null, "Issue (optional)"),
           h("select", {
-            value: inputs.issue,
+            value: inputs.issue || "",
             onChange: e => setF("issue", e.target.value),
           },
-            h("option", { value: "NSA" }, "NSA"),
+            h("option", { value: "" }, "(any)"),
+            (facets.issues || []).map(x => h("option", { key: x, value: x }, x)),
           ),
         ),
         h("div", null,
+          h("label", null, "Policy title (optional)"),
+          h("select", {
+            value: inputs.title || "",
+            onChange: e => setF("title", e.target.value),
+          },
+            h("option", { value: "" }, "(any)"),
+            titleOptions.map(x => h("option", { key: x, value: x }, x)),
+          ),
+        ),
+        h("div", { style: { flex: "0 0 80px" } },
           h("label", null, "Top-k"),
           h("select", {
             value: inputs.k,
@@ -894,7 +960,6 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats }) {
       h("div", { className: "divider" }),
 
       h("button", { onClick: onRun, disabled: loading }, loading ? "Running…" : "Run review"),
-      h("span", { className: "hint" }, " V0.1 · embedded corpus · BM25 retrieval · no live Bitable call"),
     ),
   );
 }
@@ -1134,9 +1199,11 @@ function MainApp({ corpus }) {
     ocr_text: "",
     caption_text: "",
     image_urls: [],
-    issue: "NSA",
+    issue: "",
+    title: "",
     k: 5,
   });
+  const [pendingHit, setPendingHit] = useState("");
   const [result, setResult] = useState(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -1148,7 +1215,39 @@ function MainApp({ corpus }) {
 
   // Build index once
   const index = useMemo(() => buildIndex(corpus.cases), [corpus]);
-  const stats = { cases: corpus.cases.length, rules: corpus.rules.length };
+  const pendingMap = useMemo(() => {
+    const m = new Map();
+    (corpus.pending || []).forEach(p => { if (p.case_id) m.set(p.case_id, p); });
+    return m;
+  }, [corpus]);
+  const pendingIds = useMemo(() => Array.from(pendingMap.keys()).sort(), [pendingMap]);
+  const stats = { cases: corpus.cases.length, rules: corpus.rules.length, pending: pendingMap.size };
+  const facets = corpus.facets || { issues: [], titles: [], titlesByIssue: {} };
+  const titleOptions = useMemo(() => {
+    if (inputs.issue && facets.titlesByIssue && facets.titlesByIssue[inputs.issue]) {
+      return facets.titlesByIssue[inputs.issue];
+    }
+    return facets.titles || [];
+  }, [inputs.issue, facets]);
+
+  // Auto-prefill from Pending Cases when case_id matches
+  const onPendingPick = useCallback((rawId) => {
+    const id = (rawId || "").trim();
+    if (!id) { setPendingHit(""); return; }
+    const p = pendingMap.get(id);
+    if (!p) { setPendingHit(""); return; }
+    setPendingHit(id);
+    setInputs(s => ({
+      ...s,
+      visual_summary: p.visual_summary || s.visual_summary,
+      asr_text: p.asr_text || s.asr_text,
+      ocr_text: p.ocr_text || s.ocr_text,
+      caption_text: p.caption_text || s.caption_text,
+      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : s.image_urls,
+      issue: p.issue || s.issue,
+      title: p.policy_title || s.title,
+    }));
+  }, [pendingMap]);
 
   // Item-id lookup -> pre-fill
   const onLookup = useCallback(() => {
@@ -1176,14 +1275,17 @@ function MainApp({ corpus }) {
     ].filter(Boolean).join(" ");
     const qtok = tokenize(queryText);
     setTimeout(() => {
-      let ranked = score(index, qtok, { issue: inputs.issue });
+      let ranked = score(index, qtok, { issue: inputs.issue || null, title: inputs.title || null });
       // Exclude self if item_id matches
       if (inputs.item_id) {
         ranked = ranked.filter(r => r.raw.case_id !== inputs.item_id && r.raw.record_id !== inputs.item_id);
       }
       ranked = normScores(ranked.slice(0, inputs.k));
       const rulesRanked = rankRules(
-        corpus.rules.filter(r => r.issue === inputs.issue),
+        corpus.rules.filter(r =>
+          (!inputs.issue || r.issue === inputs.issue) &&
+          (!inputs.title || r.policy_title === inputs.title)
+        ),
         qtok,
       );
       setResult({ precedents: ranked, topRule: rulesRanked[0] && rulesRanked[0].score > 0 ? rulesRanked[0] : null, query: queryText });
@@ -1224,7 +1326,7 @@ function MainApp({ corpus }) {
 
   return h("div", { className: "root" },
     h("div", null,
-      h(InputPanel, { inputs, setInputs, onRun, loading, stats }),
+      h(InputPanel, { inputs, setInputs, onRun, loading, stats, facets, titleOptions, pendingIds, pendingHit, onPendingPick }),
       h("div", { style: { marginTop: 8, fontSize: 11, color: "var(--muted)" } },
         inputs.item_id
           ? h("button", { className: "secondary", onClick: onLookup, style: { fontSize: 11, padding: "4px 8px" } },
