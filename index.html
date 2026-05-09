@@ -89,7 +89,25 @@
 </head>
 <body>
 <div id="root"></div>
-<script src="https://lf1-cdn-tos.bytegoofy.com/obj/goofy/lark-base-extension/js-sdk/v1.0.4/index.js"></script>
+<script type="module">
+  // Load the official @lark-base-open/js-sdk via public CDN.
+  // Try jsDelivr first; on failure, fall back to unpkg.
+  const URLS = [
+    "https://cdn.jsdelivr.net/npm/@lark-base-open/js-sdk@1.0.2/dist/index.min.mjs",
+    "https://unpkg.com/@lark-base-open/js-sdk@1.0.2/dist/index.min.mjs",
+  ];
+  let mod = null, lastErr = null;
+  for (const u of URLS) {
+    try { mod = await import(u); break; } catch (e) { lastErr = e; }
+  }
+  if (!mod) {
+    window.__bitableSdkError = String(lastErr && lastErr.message || lastErr || "unknown");
+  } else {
+    // Expose the imported bitable namespace so the non-module loader can see it.
+    window.bitable = mod.bitable || mod.default || mod;
+  }
+  window.dispatchEvent(new Event("bitable-sdk-ready"));
+</script>
 <script>
 // config.js — committed runtime config. No secrets here.
 // Override values locally only if your Base uses different table names.
@@ -151,9 +169,21 @@ async function loadAllRecords(table) {
   return all;
 }
 
+async function waitForBitableSdk(timeoutMs) {
+  timeoutMs = timeoutMs || 5000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (window.bitable && window.bitable.base) return true;
+    if (window.__bitableSdkError) throw new Error("Failed to load Bitable SDK from CDN: " + window.__bitableSdkError);
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
 async function loadCorpusFromBitable() {
-  if (!window.bitable || !window.bitable.base) {
-    throw new Error("Bitable SDK not available — open this plugin from inside a Base.");
+  const ok = await waitForBitableSdk(5000);
+  if (!ok || !window.bitable || !window.bitable.base) {
+    throw new Error("Bitable SDK not available — open this plugin from inside a Base (and ensure the CDN https://cdn.jsdelivr.net/npm/@lark-base-open/js-sdk is reachable).");
   }
   const base = window.bitable.base;
   const [casesTbl, rulesTbl] = await Promise.all([
