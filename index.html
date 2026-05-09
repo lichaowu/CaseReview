@@ -528,10 +528,11 @@ async function loadCorpusFromBitable() {
   const titlesByIssue = {}; // issue -> Set
   const allTitlesSet = new Set();
   const addTitle = (issue, t) => {
-    if (!t) return;
-    allTitlesSet.add(t);
-    const key = issue || "__any__";
-    (titlesByIssue[key] = titlesByIssue[key] || new Set()).add(t);
+    const v = (t == null ? "" : String(t)).trim();
+    if (!v) return;
+    allTitlesSet.add(v);
+    const key = (issue || "").trim() || "__any__";
+    (titlesByIssue[key] = titlesByIssue[key] || new Set()).add(v);
   };
   cases.forEach(c => addTitle(c.issue, c.policy_title));
   rules.forEach(r => addTitle(r.issue, r.policy_title));
@@ -539,6 +540,12 @@ async function loadCorpusFromBitable() {
   const titlesByIssueArr = {};
   Object.keys(titlesByIssue).forEach(k => titlesByIssueArr[k] = Array.from(titlesByIssue[k]).sort());
 
+  try {
+    console.log("[CaseReview] corpus loaded:",
+      "cases=" + cases.length, "rules=" + rules.length, "pending=" + pending.length,
+      "issues=" + issues.length, "titles=" + titles.length,
+      "titlesByIssue keys=" + Object.keys(titlesByIssueArr).join(","));
+  } catch(_) {}
   return { cases, rules, pending, facets: { issues, titles, titlesByIssue: titlesByIssueArr } };
 }
 
@@ -1224,10 +1231,12 @@ function MainApp({ corpus }) {
   const stats = { cases: corpus.cases.length, rules: corpus.rules.length, pending: pendingMap.size };
   const facets = corpus.facets || { issues: [], titles: [], titlesByIssue: {} };
   const titleOptions = useMemo(() => {
-    if (inputs.issue && facets.titlesByIssue && facets.titlesByIssue[inputs.issue]) {
+    const all = (facets.titles || []).slice();
+    if (inputs.issue && facets.titlesByIssue && Array.isArray(facets.titlesByIssue[inputs.issue])
+        && facets.titlesByIssue[inputs.issue].length > 0) {
       return facets.titlesByIssue[inputs.issue];
     }
-    return facets.titles || [];
+    return all;
   }, [inputs.issue, facets]);
 
   // Auto-prefill from Pending Cases when case_id matches
