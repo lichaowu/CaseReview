@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Case Review Console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+  :root {
+    --bg:#f7f8fa; --panel:#fff; --ink:#1f2328; --muted:#6b7280;
+    --line:#e5e7eb; --accent:#1f6feb; --flag:#d1242f; --pass:#1a7f37;
+    --warn:#9a6700; --chip:#f2f4f7;
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font: 13px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif; }
+  .root { display:grid; grid-template-columns: 380px 1fr; gap:16px; padding:16px; height:100vh; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:auto; }
+  .panel .head { padding:12px 16px; border-bottom:1px solid var(--line);
+    font-weight:600; font-size:14px; position:sticky; top:0; background:var(--panel); z-index:2; }
+  .panel .body { padding:16px; }
+  label { display:block; margin:10px 0 4px; font-weight:600; color:var(--ink); font-size:12px; }
+  input[type=text], textarea, select {
+    width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+    font: inherit; background:#fff; color:inherit;
+  }
+  textarea { resize:vertical; min-height:40px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row > * { flex:1; }
+  button {
+    background:var(--accent); color:#fff; border:0; border-radius:6px;
+    padding:8px 14px; font-weight:600; cursor:pointer;
+  }
+  button.secondary { background:#e5e7eb; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .hint { font-size:11px; color:var(--muted); margin-top:2px; }
+  .divider { height:1px; background:var(--line); margin:14px 0; }
+  .thumbs { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .thumbs .thumb { width:72px; height:72px; border:1px solid var(--line); border-radius:4px;
+    overflow:hidden; background:#f2f4f7; display:flex; align-items:center; justify-content:center;
+    font-size:10px; color:var(--muted); position:relative; cursor:pointer; }
+  .thumbs .thumb:hover { border-color:var(--accent); }
+  .thumbs .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .thumbs .thumb .thumb-fallback { font-size:11px; color:var(--muted); padding:0 4px; text-align:center; }
+  .thumbs .thumb .x { position:absolute; top:-6px; right:-6px; background:#fff; border:1px solid var(--line);
+    width:16px; height:16px; border-radius:50%; font-size:10px; line-height:14px; text-align:center; cursor:pointer;
+    z-index:2; }
+  .vision-row { margin-top:10px; padding:10px; border:1px dashed var(--line); border-radius:6px; background:#fafbfc; }
+  .vision-row label { font-size:11px; color:var(--muted); display:block; margin-bottom:4px; }
+  .copy-msg { font-size:11px; color:var(--accent); margin-top:6px; }
+
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#fafbfc; font-weight:600; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  tr.sel { background:#eef6ff; }
+
+  .tag { display:inline-block; padding:1px 6px; border-radius:10px; font-size:11px; font-weight:600; }
+  .tag.flag { background:#ffebe9; color:var(--flag); }
+  .tag.pass { background:#dafbe1; color:var(--pass); }
+  .tag.routine { background:#e7edff; color:#1f3a93; }
+  .tag.grey { background:#fff1bc; color:var(--warn); }
+  .tag.sim { background:var(--chip); color:var(--muted); }
+  .tag.linked { background:#f0f9ff; color:#0c4a6e; border:1px solid #bae6fd; }
+  .tag.unlinked { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+  .tag.draft { background:#f3e8ff; color:#6d28d9; }
+
+  .card { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:10px; }
+  .card h4 { margin:0 0 6px; font-size:13px; }
+  .card .kvp { font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .card pre { margin:6px 0 0; background:#fafbfc; padding:8px; border-radius:4px;
+    font-size:11px; white-space:pre-wrap; word-wrap:break-word; }
+
+  .banner { padding:10px 12px; border-radius:6px; margin-bottom:12px; font-weight:500; }
+  .banner.aligned { background:#dafbe1; color:var(--pass); }
+  .banner.mixed { background:#fff1bc; color:var(--warn); }
+  .banner.no-match { background:#f2f4f7; color:var(--muted); }
+
+  .muted { color:var(--muted); }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .decision-box { border:2px solid var(--accent); background:#f5faff; padding:12px; border-radius:8px; margin-top:12px; }
+  .decision-box .d-row { display:flex; gap:16px; margin:4px 0; }
+  .decision-box .d-row b { min-width:100px; }
+  details { margin:6px 0; }
+  summary { cursor:pointer; font-size:11px; color:var(--muted); user-select:none; }
+  .meta-row { font-size:11px; color:var(--muted); margin:4px 0; }
+  .toolbar { display:flex; gap:8px; align-items:center; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://lf1-cdn-tos.bytegoofy.com/obj/goofy/lark-base-extension/js-sdk/v1.0.4/index.js"></script>
+<script>
+// config.js — committed runtime config. No secrets here.
+// Override values locally only if your Base uses different table names.
+window.CASE_REVIEW_CONFIG = {
+  // Table names to look up at runtime, in priority order:
+  casesTableNames: ["Cases", "case_notes", "Case Notes"],
+  rulesTableNames: ["Rules", "rule_book", "Rule Book"],
+  // Filter records by this `issue` field value:
+  issue: "NSA"
+};
+</script>
+<script>
+function cellText(v) {
+  if (v == null) return "";
+  if (typeof v === "string" || typeof v === "number") return String(v);
+  if (Array.isArray(v)) return v.map(cellText).join(" ");
+  if (typeof v === "object") {
+    if (v.text != null) return String(v.text);
+    if (v.name != null) return String(v.name);
+    if (v.value != null) return cellText(v.value);
+  }
+  return "";
+}
+function cellArr(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map(x => (typeof x === "string" ? x : (x.text || x.name || ""))).filter(Boolean);
+  return [cellText(v)].filter(Boolean);
+}
+
+// Optional config (committed in git, no secrets). Defaults match this plugin's
+// expected Base layout — override locally if your table names differ.
+const CFG = (typeof window !== "undefined" && window.CASE_REVIEW_CONFIG) || {};
+const CASES_NAMES = (CFG.casesTableNames && CFG.casesTableNames.length) ? CFG.casesTableNames : ["Cases", "case_notes", "Case Notes", "cases"];
+const RULES_NAMES = (CFG.rulesTableNames && CFG.rulesTableNames.length) ? CFG.rulesTableNames : ["Rules", "rule_book", "Rule Book", "rules"];
+const ISSUE_FILTER = CFG.issue || "NSA";
+
+async function findTableByNames(base, candidates) {
+  // SDK: getTableList returns ITable[]; each has getName() and id
+  const list = await base.getTableList();
+  const named = await Promise.all(list.map(async t => ({ t, name: await t.getName() })));
+  for (const want of candidates) {
+    const hit = named.find(x => x.name === want)
+             || named.find(x => x.name && x.name.toLowerCase() === want.toLowerCase());
+    if (hit) return hit.t;
+  }
+  const got = named.map(x => x.name).join(", ");
+  throw new Error(`No table matched any of [${candidates.join(", ")}]. Found: [${got}]`);
+}
+
+async function loadAllRecords(table) {
+  const all = [];
+  let pageToken = undefined;
+  for (let i = 0; i < 50; i++) {
+    const page = await table.getRecords({ pageSize: 5000, pageToken });
+    all.push(...(page.records || []));
+    if (!page.hasMore) break;
+    pageToken = page.pageToken;
+  }
+  return all;
+}
+
+async function loadCorpusFromBitable() {
+  if (!window.bitable || !window.bitable.base) {
+    throw new Error("Bitable SDK not available — open this plugin from inside a Base.");
+  }
+  const base = window.bitable.base;
+  const [casesTbl, rulesTbl] = await Promise.all([
+    findTableByNames(base, CASES_NAMES),
+    findTableByNames(base, RULES_NAMES),
+  ]);
+  const [caseRecs, ruleRecs] = await Promise.all([
+    loadAllRecords(casesTbl),
+    loadAllRecords(rulesTbl),
+  ]);
+
+  const cases = caseRecs.map(r => {
+    const f = r.fields || {};
+    return {
+      record_id: r.recordId || r.record_id,
+      case_id: cellText(f["case_id"]),
+      source_video_id: cellText(f["source_video_id"]),
+      issue: cellText(f["issue"] || f["policy_area"]),
+      topic: cellText(f["topic"]),
+      policy_code: cellText(f["policy_code"]),
+      policy_title: cellText(f["policy_title"]),
+      decision: cellText(f["decision"]),
+      key_signals: cellArr(f["key_signals"]),
+      reference_weight: cellText(f["reference_weight"]),
+      status: cellText(f["status"]),
+      rule_applied_name: cellText(f["rule_applied"]),
+      visual_summary: cellText(f["visual_summary"]),
+      asr_text: cellText(f["asr_text"]),
+      ocr_text: cellText(f["ocr_text"]),
+      caption_text: cellText(f["caption_text"]),
+      rationale: cellText(f["rationale"]),
+    };
+  }).filter(c => c.issue === ISSUE_FILTER && c.status !== "Retired");
+
+  const rules = ruleRecs.map(r => {
+    const f = r.fields || {};
+    return {
+      record_id: r.recordId || r.record_id,
+      rule_name: cellText(f["rule_name"]),
+      issue: cellText(f["issue"] || f["policy_area"]),
+      policy_title: cellText(f["rule_name"]),
+      rule_description: cellText(f["plain_description"]),
+      rule_text: cellText(f["plain_rule_text"]),
+      examples: cellText(f["example_cases"]),
+      status: cellText(f["status"]),
+    };
+  }).filter(r => r.issue === ISSUE_FILTER);
+
+  return { cases, rules };
+}
+
+window.__loadCorpus = loadCorpusFromBitable;
+</script>
+<script>
+const { useState, useMemo, useEffect, useCallback  } = React;
+const h = React.createElement;
+
+// ---------- BM25-lite retrieval ----------
+const STOPWORDS = new Set(("a an the and or of in on to for with by from at is are was were be been it this that these those as if but").split(" "));
+
+function tokenize(s) {
+  if (!s) return [];
+  return (s + "").toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(w => w && w.length > 1 && !STOPWORDS.has(w));
+}
+
+// Field weights — visual > topic/caption > asr/ocr > rationale
+const FIELD_WEIGHTS = {
+  visual_summary: 2.0,
+  topic: 1.5,
+  caption_text: 1.5,
+  asr_text: 1.0,
+  ocr_text: 1.0,
+  rationale: 0.7,
+};
+
+function buildIndex(cases) {
+  // Build doc frequencies
+  const df = new Map();
+  const docs = cases.map(c => {
+    const fields = {};
+    const allTokens = new Set();
+    for (const [f, w] of Object.entries(FIELD_WEIGHTS)) {
+      const toks = tokenize(c[f] || "");
+      fields[f] = toks;
+      toks.forEach(t => allTokens.add(t));
+    }
+    allTokens.forEach(t => df.set(t, (df.get(t) || 0) + 1));
+    const totalLen = Object.values(fields).reduce((s, a) => s + a.length, 0);
+    return { record_id: c.record_id, fields, len: totalLen, raw: c };
+  });
+  const N = docs.length;
+  const avgLen = docs.reduce((s, d) => s + d.len, 0) / Math.max(N, 1);
+  return { docs, df, N, avgLen };
+}
+
+function score(idx, queryTokens, { issue } = {}) {
+  const { docs, df, N, avgLen } = idx;
+  const k1 = 1.5, b = 0.75;
+  const results = [];
+  for (const d of docs) {
+    if (issue && d.raw.issue !== issue) continue;
+    let s = 0;
+    for (const q of queryTokens) {
+      const n_q = df.get(q) || 0;
+      if (!n_q) continue;
+      const idf = Math.log(1 + (N - n_q + 0.5) / (n_q + 0.5));
+      // sum across weighted fields
+      for (const [f, w] of Object.entries(FIELD_WEIGHTS)) {
+        const toks = d.fields[f];
+        if (!toks || !toks.length) continue;
+        const tf = toks.filter(t => t === q).length;
+        if (!tf) continue;
+        const denom = tf + k1 * (1 - b + b * (d.len / (avgLen || 1)));
+        s += w * idf * ((tf * (k1 + 1)) / denom);
+      }
+    }
+    if (s > 0) results.push({ record_id: d.record_id, raw: d.raw, score: s });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+// Normalize score to similarity-like 0..1 for display
+function normScores(arr) {
+  if (!arr.length) return arr;
+  const max = arr[0].score || 1;
+  return arr.map(r => ({ ...r, sim: Math.min(1, r.score / max) }));
+}
+
+// ---------- Rule ranking ----------
+function rankRules(rules, queryTokens) {
+  const scored = rules.map(r => {
+    const hay = tokenize((r.rule_name || "") + " " + (r.plain_description || "") + " " + (r.plain_rule_text || ""));
+    const set = new Set(hay);
+    let s = 0;
+    for (const q of queryTokens) if (set.has(q)) s += 1;
+    return { ...r, score: s };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+// ---------- Mira payload builder (V2.3) ----------
+const PAYLOAD_VERSION = "v0.3";
+const ISSUE_DEFAULT = "NSA";
+
+function truncStr(t, n) {
+  t = (t || "").toString();
+  if (t.length <= n) return t;
+  return t.slice(0, n) + "…";
+}
+
+function buildPayload({ inputs, precedents, topRule, issue }) {
+  const issueType = issue || inputs.issue || ISSUE_DEFAULT;
+  const candidate = {
+    item_id: inputs.item_id || "",
+    topic: inputs.topic || "",
+    visual_summary: inputs.visual_summary || "",
+    asr_text: inputs.asr_text || "",
+    ocr_text: inputs.ocr_text || "",
+    caption_text: inputs.caption_text || "",
+  };
+  if (inputs.image_urls && inputs.image_urls.length) {
+    candidate.image_urls = inputs.image_urls.slice(0, 30);
+  }
+  const precs = (precedents || []).map((p, i) => {
+    const r = p.raw || {};
+    return {
+      rank: i + 1,
+      case_id: r.case_id || r.record_id || "",
+      policy_code: r.policy_code || "",
+      policy_title: r.policy_title || "",
+      topic: r.topic || "",
+      decision: r.decision || "",
+      status: r.status || "",
+      sim_score: Number((p.sim || 0).toFixed(3)),
+      visual_summary: truncStr(r.visual_summary, 600),
+      asr_text: truncStr(r.asr_text, 400),
+      ocr_text: truncStr(r.ocr_text, 200),
+      caption_text: truncStr(r.caption_text, 200),
+      rationale: truncStr(r.rationale, 500),
+      key_signals: Array.isArray(r.key_signals) ? r.key_signals : (r.key_signals ? [String(r.key_signals)] : []),
+      rule_applied: (r.rule_applied_id || "") + (r.rule_applied_name ? " " + r.rule_applied_name : ""),
+    };
+  });
+  const rule = topRule ? {
+    rule_id: topRule.rule_id || topRule.record_id || "",
+    rule_name: topRule.rule_name || "",
+    issue: topRule.issue || "",
+    policy_title: topRule.policy_title || "",
+    rule_text: truncStr(topRule.rule_text, 1500),
+    examples: truncStr(topRule.examples, 600),
+  } : null;
+  return {
+    schema: "case-review-payload",
+    version: PAYLOAD_VERSION,
+    issue: issueType,
+    candidate,
+    precedents: precs,
+    candidate_rule: rule,
+  };
+}
+
+function tryParseReasonedJson(raw) {
+  if (!raw) return null;
+  let txt = raw.trim();
+  // Strip ```json / ``` fences if model added them anyway
+  txt = txt.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  // Find the outermost JSON object
+  const start = txt.indexOf("{");
+  const end = txt.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return null;
+  const candidate = txt.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---------- Components ----------
+function Tag({ kind, children }) {
+  return h("span", { className: "tag " + (kind || "") }, children);
+}
+
+function Thumb({ url, onRemove, idx }) {
+  const [err, setErr] = useState(false);
+  // Open the URL in a new tab on click — gives user a manual fallback when CDN
+  // blocks hotlinking from the Mira sandbox iframe origin.
+  const open = (e) => { e.stopPropagation(); window.open(url, "_blank", "noopener,noreferrer"); };
+  return h("div", { className: "thumb", onClick: open, title: url },
+    !err
+      ? h("img", {
+          src: url,
+          onError: () => setErr(true),
+          alt: "",
+          referrerPolicy: "no-referrer",
+          loading: "lazy",
+        })
+      : h("span", { className: "thumb-fallback" }, `#${(idx ?? 0) + 1} ↗`),
+    onRemove && h("span", {
+      className: "x",
+      onClick: (e) => { e.stopPropagation(); onRemove(); },
+      title: "remove",
+    }, "×"),
+  );
+}
+
+function InputPanel({ inputs, setInputs, onRun, loading, stats }) {
+  const setF = (k, v) => setInputs({ ...inputs, [k]: v });
+  const [urlDraft, setUrlDraft] = useState("");
+  const parseUrls = (raw) => {
+    const s = (raw || "").trim();
+    if (!s) return [];
+    // try JSON array first
+    if (s.startsWith("[")) {
+      try {
+        const arr = JSON.parse(s);
+        if (Array.isArray(arr)) return arr.map(x => String(x).trim()).filter(Boolean);
+      } catch (e) { /* fall through */ }
+    }
+    // otherwise split by newline / comma / whitespace, keep only http(s) tokens
+    return s.split(/[\s,]+/).map(x => x.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, "")).filter(x => /^https?:\/\//i.test(x));
+  };
+  const addUrl = () => {
+    const urls = parseUrls(urlDraft);
+    if (!urls.length) return;
+    setF("image_urls", [...(inputs.image_urls || []), ...urls]);
+    setUrlDraft("");
+  };
+  const clearUrls = () => setF("image_urls", []);
+
+  // ----- V2: vision-prompt clipboard hand-off to Mira chat -----
+  const [visionReply, setVisionReply] = useState("");
+  const [copyMsg, setCopyMsg] = useState("");
+  const buildVisionPrompt = () => {
+    const urls = inputs.image_urls || [];
+    if (!urls.length) return "";
+    const numbered = urls.map((u, i) => `${i + 1}. ${u}`).join("\n");
+    const ctx = [
+      inputs.caption_text && `caption_text: ${inputs.caption_text}`,
+      inputs.asr_text && `asr_text: ${inputs.asr_text}`,
+      inputs.ocr_text && `ocr_text: ${inputs.ocr_text}`,
+    ].filter(Boolean).join("\n");
+    return [
+      "You are a Trust & Safety policy reviewer for short-video content.",
+      "Look at the keyframes from the video below (in order) and write a single",
+      "concise visual_summary (≤120 words, plain prose, no headings, no bullets).",
+      "",
+      "Cover, when present: subject(s), action, setting, on-screen text, notable",
+      "objects, mood/tone, and any policy-relevant signals — weapons, fire, blood,",
+      "topic / category keywords describing the candidate case",
+      "Be specific and observational; do NOT make a policy judgement.",
+      "",
+      "Return ONLY the visual_summary text — no preamble, no quotes.",
+      "",
+      ctx ? `Additional context (already known):\n${ctx}\n` : "",
+      `Keyframes (${urls.length} images, in order):`,
+      numbered,
+    ].filter(x => x !== "").join("\n");
+  };
+  const copyVisionPrompt = async () => {
+    const p = buildVisionPrompt();
+    if (!p) { setCopyMsg("Add image URLs first"); setTimeout(() => setCopyMsg(""), 2000); return; }
+    try {
+      await navigator.clipboard.writeText(p);
+      setCopyMsg(`Copied (${(inputs.image_urls || []).length} keyframes). Paste into Mira chat →`);
+    } catch (e) {
+      // clipboard API may be blocked in sandbox; fall back to a textarea select+copy
+      const ta = document.createElement("textarea");
+      ta.value = p; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); setCopyMsg("Copied via fallback. Paste into Mira chat →"); }
+      catch (_) { setCopyMsg("Copy failed — open the prompt panel below to copy manually."); }
+      document.body.removeChild(ta);
+    }
+    setTimeout(() => setCopyMsg(""), 4000);
+  };
+  const fillFromReply = () => {
+    const t = (visionReply || "").trim();
+    if (!t) return;
+    setF("visual_summary", t);
+    setVisionReply("");
+  };
+  // -------------------------------------------------------------
+
+  const removeUrl = (i) => {
+    const next = [...(inputs.image_urls || [])];
+    next.splice(i, 1);
+    setF("image_urls", next);
+  };
+
+  return h("div", { className: "panel" },
+    h("div", { className: "head" }, "Case input"),
+    h("div", { className: "body" },
+      h("div", { className: "meta-row" },
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules · retrieval: BM25 (client-side)`),
+
+      h("label", null, "Case ID / record ID (optional — pre-fills from corpus)"),
+      h("input", {
+        type: "text", value: inputs.item_id, placeholder: "case_id or rec...",
+        onChange: e => setF("item_id", e.target.value),
+      }),
+
+      h("label", null, "Visual summary"),
+      h("textarea", {
+        rows: 3, value: inputs.visual_summary,
+        onChange: e => setF("visual_summary", e.target.value),
+        placeholder: "What the frames show",
+      }),
+
+      h("label", null, "ASR (speech-to-text)"),
+      h("textarea", {
+        rows: 2, value: inputs.asr_text,
+        onChange: e => setF("asr_text", e.target.value),
+      }),
+
+      h("label", null, "OCR (on-screen text)"),
+      h("textarea", {
+        rows: 2, value: inputs.ocr_text,
+        onChange: e => setF("ocr_text", e.target.value),
+      }),
+
+      h("label", null, "Caption text"),
+      h("textarea", {
+        rows: 2, value: inputs.caption_text,
+        onChange: e => setF("caption_text", e.target.value),
+      }),
+
+      h("label", null, `Image URLs (display-only; ${(inputs.image_urls || []).length} loaded)`),
+      h("textarea", {
+        rows: 3, value: urlDraft,
+        placeholder: "Paste one URL per line, comma-separated, or a JSON array: [\"https://...\", \"https://...\"]",
+        onChange: e => setUrlDraft(e.target.value),
+        onKeyDown: e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addUrl(); } },
+      }),
+      h("div", { className: "row" },
+        h("button", { className: "secondary", onClick: addUrl, style: { flex: "0 0 auto" } }, "+ Add URLs"),
+        (inputs.image_urls && inputs.image_urls.length > 0) &&
+          h("button", { className: "secondary", onClick: clearUrls, style: { flex: "0 0 auto" } }, "Clear all"),
+      ),
+      (inputs.image_urls && inputs.image_urls.length > 0) &&
+        h("div", { className: "thumbs" },
+          inputs.image_urls.map((u, i) =>
+            h(Thumb, { key: i, idx: i, url: u, onRemove: () => removeUrl(i) }),
+          ),
+        ),
+
+      (inputs.image_urls && inputs.image_urls.length > 0) && h("div", { className: "vision-row" },
+        h("div", { className: "row" },
+          h("button", {
+            className: "secondary",
+            onClick: copyVisionPrompt,
+            style: { flex: "0 0 auto" },
+            title: "Copy a ready-to-paste prompt; paste it into the Mira chat sidebar to get a visual_summary back",
+          }, "📋 Copy vision prompt"),
+          h("details", { style: { flex: "1 1 auto" } },
+            h("summary", null, "preview prompt"),
+            h("pre", { style: { fontSize: "11px", maxHeight: "160px", overflow: "auto", background: "#fafbfc", padding: "8px", border: "1px solid var(--line)", borderRadius: "4px", whiteSpace: "pre-wrap" } },
+              buildVisionPrompt()),
+          ),
+        ),
+        copyMsg && h("div", { className: "copy-msg" }, copyMsg),
+        h("label", { style: { marginTop: "8px" } }, "Paste Mira's reply here → fills Visual summary"),
+        h("textarea", {
+          rows: 3, value: visionReply,
+          placeholder: "Paste the visual_summary text Mira returned…",
+          onChange: e => setVisionReply(e.target.value),
+        }),
+        h("div", { className: "row" },
+          h("button", {
+            className: "secondary",
+            onClick: fillFromReply,
+            disabled: !(visionReply || "").trim(),
+            style: { flex: "0 0 auto" },
+          }, "↳ Fill Visual summary"),
+        ),
+      ),
+
+      h("div", { className: "divider" }),
+
+      h("div", { className: "row" },
+        h("div", null,
+          h("label", null, "Issue type"),
+          h("select", {
+            value: inputs.issue,
+            onChange: e => setF("issue", e.target.value),
+          },
+            h("option", { value: "NSA" }, "NSA"),
+          ),
+        ),
+        h("div", null,
+          h("label", null, "Top-k"),
+          h("select", {
+            value: inputs.k,
+            onChange: e => setF("k", parseInt(e.target.value, 10)),
+          },
+            [3, 5, 8, 10].map(k => h("option", { key: k, value: k }, k)),
+          ),
+        ),
+      ),
+
+      h("div", { className: "divider" }),
+
+      h("button", { onClick: onRun, disabled: loading }, loading ? "Running…" : "Run review"),
+      h("span", { className: "hint" }, " V0.1 · embedded corpus · BM25 retrieval · no live Bitable call"),
+    ),
+  );
+}
+
+function PrecedentRow({ r, onSelect, selected }) {
+  const d = r.raw;
+  return h("tr", { className: selected ? "sel" : "", onClick: onSelect, style: { cursor: "pointer" } },
+    h("td", { className: "mono" }, (d.case_id || d.record_id).slice(0, 14)),
+    h("td", null, h(Tag, { kind: d.decision === "FLAG" ? "flag" : "pass" }, d.decision || "—")),
+    h("td", null, d.rule_applied_name
+      ? h(Tag, { kind: "linked" }, d.rule_applied_name.length > 32 ? d.rule_applied_name.slice(0, 32) + "…" : d.rule_applied_name)
+      : h(Tag, { kind: "unlinked" }, "unlinked"),
+    ),
+    h("td", null, d.status || "—"),
+    h("td", null, h(Tag, { kind: "sim" }, r.sim.toFixed(2))),
+    h("td", { style: { maxWidth: 260, fontSize: 11, color: "#4b5563" } },
+      ((d.visual_summary || d.asr_text || d.rationale) || "").slice(0, 160) + "…"),
+  );
+}
+
+function ConsistencyBanner({ precedents }) {
+  if (!precedents.length) {
+    return h("div", { className: "banner no-match" }, "No matching precedent in current corpus. Treat as candidate grey case.");
+  }
+  const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
+  const passes = precedents.filter(p => p.raw.decision === "PASS").length;
+  const total = flags + passes;
+  if (total === 0) {
+    return h("div", { className: "banner no-match" }, "Precedents found but no decisions recorded.");
+  }
+  if (flags === 0 || passes === 0) {
+    return h("div", { className: "banner aligned" },
+      `✓ Aligned — ${total} precedent${total > 1 ? "s" : ""} all ${flags > 0 ? "FLAG" : "PASS"}`);
+  }
+  return h("div", { className: "banner mixed" },
+    `⚠ Mixed precedent — ${flags} FLAG / ${passes} PASS in top-${precedents.length}. Candidate grey case — review distinguishing factors.`);
+}
+
+function DraftDecision({ precedents, topRule }) {
+  if (!precedents.length) {
+    return h("div", { className: "decision-box" },
+      h("h4", { style: { margin: "0 0 8px" } }, "Draft decision"),
+      h("div", { className: "d-row" }, h("b", null, "decision:"), h("span", { className: "muted" }, "no precedent — requires policy-team authoring")),
+      h("div", { className: "d-row" }, h("b", null, "case_type:"), h(Tag, { kind: "grey" }, "grey (novel)")),
+      h("div", { className: "d-row" }, h("b", null, "next step:"), "Draft a new AI Rule Book entry OR flag policy-gap item via workflow node U3."),
+    );
+  }
+  const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
+  const passes = precedents.filter(p => p.raw.decision === "PASS").length;
+  const total = flags + passes;
+  const mixed = flags > 0 && passes > 0;
+  const decision = flags > passes ? "FLAG" : (passes > flags ? "PASS" : "—");
+  const caseType = mixed ? "grey" : "routine";
+  const topSim = precedents[0].sim;
+  const confidence = topSim > 0.7 && !mixed ? "high" :
+                     topSim > 0.4 || mixed ? "medium" : "low";
+
+  return h("div", { className: "decision-box" },
+    h("h4", { style: { margin: "0 0 8px" } }, "Draft decision"),
+    h("div", { className: "d-row" },
+      h("b", null, "decision:"),
+      h(Tag, { kind: decision === "FLAG" ? "flag" : "pass" }, decision),
+      h("span", { className: "muted", style: { fontSize: 11 } },
+        `(dominant in ${Math.max(flags, passes)}/${total} precedents)`),
+    ),
+    h("div", { className: "d-row" },
+      h("b", null, "case_type:"),
+      h(Tag, { kind: caseType === "grey" ? "grey" : "routine" }, caseType),
+    ),
+    h("div", { className: "d-row" },
+      h("b", null, "suggested rule:"),
+      topRule
+        ? h("span", { className: "mono" }, topRule.rule_name)
+        : h("span", { className: "muted" }, "no rule matched"),
+    ),
+    h("div", { className: "d-row" },
+      h("b", null, "confidence:"),
+      h("span", null, confidence, " ",
+        h("span", { className: "muted", style: { fontSize: 11 } }, `(top-sim ${topSim.toFixed(2)})`)),
+    ),
+    h("div", { className: "d-row" },
+      h("b", null, "next step:"),
+      caseType === "grey"
+        ? "Populate IRAC fields (fact_summary, issue, rule_invoked, rule_signals_present, analysis, distinguishing_factors, disposition)."
+        : "Confirm decision + rationale one-liner; promote to Peer Reviewed after second-analyst pass.",
+    ),
+  );
+}
+
+function RuleCard({ rule }) {
+  if (!rule) return null;
+  return h("div", { className: "card" },
+    h("h4", null, rule.rule_name || "(no rule_name)"),
+    h("div", { className: "kvp" },
+      h(Tag, { kind: "linked" }, rule.issue || "—"),
+      " · status: ", rule.status || "—"),
+    rule.plain_description && h("div", { style: { margin: "6px 0", fontSize: 12 } }, rule.plain_description),
+    rule.plain_rule_text && h("details", null,
+      h("summary", null, "plain_rule_text"),
+      h("pre", null, rule.plain_rule_text),
+    ),
+    rule.example_cases && h("details", null,
+      h("summary", null, "example_cases"),
+      h("pre", null, rule.example_cases),
+    ),
+  );
+}
+
+function PrecedentDetail({ p }) {
+  if (!p) return null;
+  const d = p.raw;
+  return h("div", { className: "card", style: { background: "#fafbfc" } },
+    h("h4", null, `Precedent detail · ${d.case_id || d.record_id}`),
+    h("div", { className: "kvp" },
+      h(Tag, { kind: d.decision === "FLAG" ? "flag" : "pass" }, d.decision || "—"),
+      " · ", d.issue,
+      d.policy_title && ` · ${d.policy_title}`,
+      d.status && ` · ${d.status}`,
+      d.reference_weight && ` · weight: ${d.reference_weight}`),
+    d.rule_applied_name && h("div", { className: "kvp" }, "rule_applied: ", h("b", null, d.rule_applied_name)),
+    d.key_signals && d.key_signals.length > 0 && h("div", { className: "kvp" },
+      "signals: ", d.key_signals.map((s, i) => h(Tag, { key: i, kind: "sim" }, s)).reduce((a, b) => [a, " ", b])),
+    d.visual_summary && h("details", { open: true }, h("summary", null, "visual_summary"), h("pre", null, d.visual_summary)),
+    d.asr_text && h("details", null, h("summary", null, "asr_text"), h("pre", null, d.asr_text)),
+    d.ocr_text && h("details", null, h("summary", null, "ocr_text"), h("pre", null, d.ocr_text)),
+    d.caption_text && h("details", null, h("summary", null, "caption_text"), h("pre", null, d.caption_text)),
+    d.rationale && h("details", { open: true }, h("summary", null, "rationale"), h("pre", null, d.rationale)),
+  );
+}
+
+
+function ReasonedVerdict({ v }) {
+  if (!v) return null;
+  const dec = (v.draft_decision || "").toUpperCase();
+  const decKind = dec === "FLAG" ? "flag" : dec === "PASS" ? "pass" : "sim";
+  const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
+  return h("div", { className: "panel", style: { marginTop: 16, borderColor: "#7c3aed" } },
+    h("div", { className: "head", style: { background: "#1e1b4b" } },
+      "🧠 Reasoned verdict (LLM)"),
+    h("div", { className: "body" },
+      h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+        h(Tag, { kind: decKind }, "decision: ", dec || "?"),
+        v.policy_title && h(Tag, { kind: "sim" }, v.policy_title),
+        v.severity && h(Tag, { kind: sevKind }, "severity: ", v.severity),
+        (typeof v.confidence === "number") && h(Tag, { kind: v.confidence >= 7 ? "pass" : v.confidence <= 4 ? "flag" : "sim" },
+          "confidence: ", v.confidence, "/10"),
+        v.grey && h(Tag, { kind: "flag" }, "GREY"),
+        v.policy_gap_flag && h(Tag, { kind: "flag" }, "POLICY GAP"),
+      ),
+      v.applied_rule && h("div", { className: "kvp", style: { marginTop: 10 } },
+        "applied_rule: ", h("b", null, v.applied_rule)),
+      v.rule_rationale && h("div", { className: "muted", style: { fontSize: 12, marginTop: 4 } }, v.rule_rationale),
+
+      Array.isArray(v.precedent_analysis) && v.precedent_analysis.length > 0 && h(React.Fragment, null,
+        h("h3", { style: { marginTop: 16, fontSize: 13 } }, "Precedent analysis"),
+        h("table", null,
+          h("thead", null, h("tr", null,
+            h("th", null, "Case"),
+            h("th", null, "Applic."),
+            h("th", null, "Align"),
+            h("th", null, "Shared"),
+            h("th", null, "Conflicting"),
+          )),
+          h("tbody", null, v.precedent_analysis.map((pa, i) => {
+            const ap = (pa.applicability || "").toUpperCase();
+            const apKind = ap === "APPLICABLE" ? "pass" : ap === "PARTIAL" ? "sim" : "flag";
+            return h("tr", { key: i },
+              h("td", null, pa.case_id || "?"),
+              h("td", null, h(Tag, { kind: apKind }, ap || "?")),
+              h("td", null, pa.decision_alignment || "—"),
+              h("td", null, Array.isArray(pa.shared_signals) ? pa.shared_signals.join(", ") : (pa.shared_signals || "—")),
+              h("td", null, Array.isArray(pa.conflicting_signals) ? pa.conflicting_signals.join(", ") : (pa.conflicting_signals || "—")),
+            );
+          })),
+        ),
+      ),
+
+      v.reasoning && h("div", { style: { marginTop: 14 } },
+        v.reasoning.visual_analysis && h("details", { open: true },
+          h("summary", null, "[VISUAL ANALYSIS]"), h("pre", null, v.reasoning.visual_analysis)),
+        v.reasoning.text_analysis && h("details", null,
+          h("summary", null, "[TEXT ANALYSIS]"), h("pre", null, v.reasoning.text_analysis)),
+        v.reasoning.first_pass && h("details", { open: true },
+          h("summary", null, "[FIRST PASS]"), h("pre", null, v.reasoning.first_pass)),
+        v.reasoning.second_pass && h("details", { open: true },
+          h("summary", null, "[SECOND PASS]"), h("pre", null, v.reasoning.second_pass)),
+        v.reasoning.verdict && h("details", { open: true },
+          h("summary", null, "[VERDICT]"), h("pre", null, v.reasoning.verdict)),
+      ),
+
+      Array.isArray(v.watch_outs) && v.watch_outs.length > 0 && h("div", { style: { marginTop: 12 } },
+        h("div", { className: "kvp" }, "Watch-outs:"),
+        h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 } },
+          v.watch_outs.map((w, i) => h(Tag, { key: i, kind: "sim" }, w))),
+      ),
+
+      v.next_step && h("div", { className: "kvp", style: { marginTop: 12 } },
+        "next_step: ", h("b", null, v.next_step)),
+
+      Array.isArray(v.exemptions_applied) && v.exemptions_applied.length > 0 && h("div", { className: "kvp", style: { marginTop: 6 } },
+        "exemptions: ", v.exemptions_applied.join(", ")),
+    ),
+  );
+}
+
+function App() {
+  const [corpus, setCorpus] = useState(null);
+  const [corpusError, setCorpusError] = useState("");
+  const [corpusLoading, setCorpusLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const c = await window.__loadCorpus();
+        if (!cancelled) { setCorpus(c); setCorpusLoading(false); }
+      } catch (e) {
+        if (!cancelled) { setCorpusError(String(e && e.message || e)); setCorpusLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (corpusLoading) return h("div", { style: { padding: 24, fontSize: 13 } }, "Loading corpus from Base…");
+  if (corpusError) return h("div", { style: { padding: 24, fontSize: 13, color: "#d1242f" } },
+    "Failed to load corpus: ", corpusError, h("br"), h("br"),
+    h("span", { className: "muted" }, "Make sure this plugin is opened from inside a Base whose tables match the configured names."));
+  if (!corpus) return null;
+
+  const [inputs, setInputs] = useState({
+    item_id: "",
+    visual_summary: "",
+    asr_text: "",
+    ocr_text: "",
+    caption_text: "",
+    image_urls: [],
+    issue: "NSA",
+    k: 5,
+  });
+  const [result, setResult] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [payloadJson, setPayloadJson] = useState("");
+  const [reasoningCopied, setReasoningCopied] = useState(false);
+  const [reasonedRaw, setReasonedRaw] = useState("");
+  const [reasonedVerdict, setReasonedVerdict] = useState(null);
+  const [reasonedError, setReasonedError] = useState("");
+
+  // Build index once
+  const index = useMemo(() => buildIndex(corpus.cases), [corpus]);
+  const stats = { cases: corpus.cases.length, rules: corpus.rules.length };
+
+  // Item-id lookup -> pre-fill
+  const onLookup = useCallback(() => {
+    const q = inputs.item_id.trim();
+    if (!q) return;
+    const c = corpus.cases.find(x => x.case_id === q || x.record_id === q || x.source_video_id === q);
+    if (c) {
+      setInputs(s => ({
+        ...s,
+        visual_summary: c.visual_summary || s.visual_summary,
+        asr_text: c.asr_text || s.asr_text,
+        ocr_text: c.ocr_text || s.ocr_text,
+        caption_text: c.caption_text || s.caption_text,
+      }));
+    } else {
+      alert("Item ID not found in current corpus (case_id / record_id / source_video_id)");
+    }
+  }, [inputs.item_id, corpus]);
+
+  const onRun = useCallback(() => {
+    setLoading(true);
+    // Synthesize query text
+    const queryText = [
+      inputs.visual_summary, inputs.asr_text, inputs.ocr_text, inputs.caption_text,
+    ].filter(Boolean).join(" ");
+    const qtok = tokenize(queryText);
+    setTimeout(() => {
+      let ranked = score(index, qtok, { issue: inputs.issue });
+      // Exclude self if item_id matches
+      if (inputs.item_id) {
+        ranked = ranked.filter(r => r.raw.case_id !== inputs.item_id && r.raw.record_id !== inputs.item_id);
+      }
+      ranked = normScores(ranked.slice(0, inputs.k));
+      const rulesRanked = rankRules(
+        corpus.rules.filter(r => r.issue === inputs.issue),
+        qtok,
+      );
+      setResult({ precedents: ranked, topRule: rulesRanked[0] && rulesRanked[0].score > 0 ? rulesRanked[0] : null, query: queryText });
+      setSelectedIdx(0);
+      setLoading(false);
+    }, 20);
+  }, [inputs, index, corpus]);
+
+  const onBuildPayload = useCallback(() => {
+    if (!result) return;
+    const payload = buildPayload({
+      inputs,
+      precedents: result.precedents,
+      topRule: result.topRule,
+      issue: inputs.issue,
+    });
+    const txt = JSON.stringify(payload, null, 2);
+    setPayloadJson(txt);
+    setReasoningCopied(false);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(
+        () => setReasoningCopied(true),
+        () => setReasoningCopied(false),
+      );
+    }
+  }, [result, inputs]);
+
+  const onParseReply = useCallback(() => {
+    setReasonedError("");
+    const parsed = tryParseReasonedJson(reasonedRaw);
+    if (!parsed) {
+      setReasonedError("Could not parse JSON. Make sure the reply contains a single {…} object.");
+      setReasonedVerdict(null);
+      return;
+    }
+    setReasonedVerdict(parsed);
+  }, [reasonedRaw]);
+
+  return h("div", { className: "root" },
+    h("div", null,
+      h(InputPanel, { inputs, setInputs, onRun, loading, stats }),
+      h("div", { style: { marginTop: 8, fontSize: 11, color: "var(--muted)" } },
+        inputs.item_id
+          ? h("button", { className: "secondary", onClick: onLookup, style: { fontSize: 11, padding: "4px 8px" } },
+              "Pre-fill from corpus")
+          : null,
+      ),
+    ),
+
+    h("div", { className: "panel" },
+      h("div", { className: "head" }, "Review output"),
+      h("div", { className: "body" },
+        !result && h("div", { className: "muted" }, "Fill input on the left, click Run review."),
+
+        result && h(React.Fragment, null,
+          h(ConsistencyBanner, { precedents: result.precedents }),
+
+          h(DraftDecision, { precedents: result.precedents, topRule: result.topRule }),
+
+          h("h3", { style: { marginTop: 20, fontSize: 13 } }, `Retrieved precedents (top-${result.precedents.length})`),
+          result.precedents.length === 0
+            ? h("div", { className: "muted", style: { fontStyle: "italic" } }, "No candidates scored > 0. Try broadening inputs.")
+            : h("table", null,
+                h("thead", null, h("tr", null,
+                  h("th", null, "ID"),
+                  h("th", null, "Dec."),
+                  h("th", null, "Rule"),
+                  h("th", null, "Status"),
+                  h("th", null, "Sim"),
+                  h("th", null, "Preview"),
+                )),
+                h("tbody", null,
+                  result.precedents.map((r, i) =>
+                    h(PrecedentRow, {
+                      key: r.record_id, r, selected: i === selectedIdx,
+                      onSelect: () => setSelectedIdx(i),
+                    }),
+                  ),
+                ),
+              ),
+
+          h("h3", { style: { marginTop: 20, fontSize: 13 } }, "Most-likely rule"),
+          result.topRule
+            ? h(RuleCard, { rule: result.topRule })
+            : h("div", { className: "muted", style: { fontStyle: "italic" } }, "No rule matched — may indicate a policy-gap item."),
+
+          result.precedents.length > 0 && h(React.Fragment, null,
+            h("h3", { style: { marginTop: 20, fontSize: 13 } }, "Precedent detail"),
+            h(PrecedentDetail, { p: result.precedents[selectedIdx] }),
+          ),
+
+          h("div", { className: "meta-row", style: { marginTop: 20 } },
+            h("details", null,
+              h("summary", null, "debug: query tokens"),
+              h("pre", null, tokenize(result.query).join(" ")),
+            ),
+          ),
+
+          // ---------- V2.3: payload hand-off to Mira reviewer skill ----------
+          h("div", { style: { marginTop: 24, padding: 14, border: "1px dashed #7c3aed", borderRadius: 8, background: "#0f0a23" } },
+            h("div", { style: { fontSize: 13, fontWeight: 600, color: "#c4b5fd", marginBottom: 8 } },
+              "Step 2 — Send payload to Mira reviewer skill"),
+            h("div", { className: "muted", style: { fontSize: 12, marginBottom: 10 } },
+              "Build a compact JSON payload (candidate + precedents + top rule) and copy it into Mira chat. The reviewer skill applies the methodology server-side and returns a structured verdict — paste the JSON reply below."),
+            h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 } },
+              h("button", { onClick: onBuildPayload },
+                reasoningCopied ? "✓ Payload copied" : "Build & copy payload"),
+              payloadJson && h("button", { className: "secondary",
+                onClick: () => { navigator.clipboard && navigator.clipboard.writeText(payloadJson).then(() => setReasoningCopied(true)); } },
+                "Copy again"),
+              payloadJson && h("span", { className: "muted", style: { fontSize: 11, alignSelf: "center" } },
+                "(", payloadJson.length.toLocaleString(), " chars · payload ", PAYLOAD_VERSION, ")"),
+            ),
+            payloadJson && h("details", { style: { marginBottom: 10 } },
+              h("summary", { style: { fontSize: 12, color: "var(--muted)" } }, "Preview payload (manual copy fallback)"),
+              h("textarea", {
+                readOnly: true, value: payloadJson,
+                style: { width: "100%", minHeight: 160, fontFamily: "ui-monospace, monospace", fontSize: 11, marginTop: 6 },
+                onFocus: e => e.target.select(),
+              }),
+            ),
+            h("div", { style: { fontSize: 12, color: "var(--muted)", marginBottom: 4 } },
+              "Paste Mira's JSON reply:"),
+            h("textarea", {
+              value: reasonedRaw,
+              onChange: e => setReasonedRaw(e.target.value),
+              placeholder: '{"draft_decision": "...", "policy_title": "...", "confidence": 7, ...}',
+              style: { width: "100%", minHeight: 120, fontFamily: "ui-monospace, monospace", fontSize: 11 },
+            }),
+            h("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center" } },
+              h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim() }, "Render reasoned verdict"),
+              reasonedRaw && h("button", { className: "secondary", onClick: () => { setReasonedRaw(""); setReasonedVerdict(null); setReasonedError(""); } }, "Clear"),
+              reasonedError && h("span", { style: { color: "#f87171", fontSize: 12 } }, reasonedError),
+            ),
+          ),
+
+          reasonedVerdict && h(ReasonedVerdict, { v: reasonedVerdict }),
+        ),
+      ),
+    ),
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body>
+</html>
