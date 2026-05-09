@@ -342,6 +342,10 @@
     border: 2px solid var(--canvas);
   }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted-soft); }
+
+  /* v2.5.2 filter row alignment */
+  .row { align-items: flex-end; }
+  .row > div > label { display:block; min-height: 1.4em; line-height: 1.4em; }
 </style>
 </head>
 <body>
@@ -448,6 +452,39 @@ async function findTableByNamesOptional(base, names) {
   try { return await findTableByNames(base, names); } catch (e) { return null; }
 }
 
+async function buildFieldIndex(table) {
+  // Returns { byName: { name -> field_id }, byId: { id -> name }, types: { id -> type } }
+  try {
+    const metas = await table.getFieldMetaList();
+    const byName = {};
+    const byId = {};
+    const types = {};
+    for (const m of metas) {
+      const id = m.id || m.field_id;
+      const nm = m.name || m.field_name;
+      if (id && nm) {
+        byName[nm] = id;
+        byId[id] = nm;
+        types[id] = m.type;
+      }
+    }
+    return { byName, byId, types };
+  } catch (e) {
+    console.warn("[CaseReview] getFieldMetaList failed:", e);
+    return { byName: {}, byId: {}, types: {} };
+  }
+}
+
+function readCell(fieldsObj, fieldIndex, name) {
+  if (!fieldsObj) return undefined;
+  // Try by name first (some SDK versions key by name)
+  if (fieldsObj[name] !== undefined) return fieldsObj[name];
+  // Then by resolved id
+  const id = fieldIndex && fieldIndex.byName ? fieldIndex.byName[name] : null;
+  if (id && fieldsObj[id] !== undefined) return fieldsObj[id];
+  return undefined;
+}
+
 async function loadCorpusFromBitable() {
   const ok = await waitForBitableSdk(5000);
   if (!ok || !window.bitable || !window.bitable.base) {
@@ -459,32 +496,45 @@ async function loadCorpusFromBitable() {
     findTableByNames(base, RULES_NAMES),
   ]);
   const pendingTbl = await findTableByNamesOptional(base, PENDING_NAMES);
+  if (!pendingTbl) {
+    console.warn("[CaseReview] Pending Cases table NOT FOUND — names tried:", PENDING_NAMES);
+  }
+
+  const [casesIdx, rulesIdx, pendingIdx] = await Promise.all([
+    buildFieldIndex(casesTbl),
+    buildFieldIndex(rulesTbl),
+    pendingTbl ? buildFieldIndex(pendingTbl) : Promise.resolve(null),
+  ]);
+
   const [caseRecs, ruleRecs, pendingRecs] = await Promise.all([
     loadAllRecords(casesTbl),
     loadAllRecords(rulesTbl),
     pendingTbl ? loadAllRecords(pendingTbl) : Promise.resolve([]),
   ]);
 
+  const get = (f, idx, name) => cellText(readCell(f, idx, name));
+  const getArr = (f, idx, name) => cellArr(readCell(f, idx, name));
+
   const cases = caseRecs.map(r => {
     const f = r.fields || {};
     return {
       record_id: r.recordId || r.record_id,
-      case_id: cellText(f["case_id"]),
-      source_video_id: cellText(f["source_video_id"]),
-      issue: cellText(f["issue"] || f["policy_area"]),
-      topic: cellText(f["topic"]),
-      policy_code: cellText(f["policy_code"]),
-      policy_title: cellText(f["policy_title"]),
-      decision: cellText(f["decision"]),
-      key_signals: cellArr(f["key_signals"]),
-      reference_weight: cellText(f["reference_weight"]),
-      status: cellText(f["status"]),
-      rule_applied_name: cellText(f["rule_applied"]),
-      visual_summary: cellText(f["visual_summary"]),
-      asr_text: cellText(f["asr_text"]),
-      ocr_text: cellText(f["ocr_text"]),
-      caption_text: cellText(f["caption_text"]),
-      rationale: cellText(f["rationale"]),
+      case_id: get(f, casesIdx, "case_id"),
+      source_video_id: get(f, casesIdx, "source_video_id"),
+      issue: get(f, casesIdx, "issue") || get(f, casesIdx, "policy_area"),
+      topic: get(f, casesIdx, "topic"),
+      policy_code: get(f, casesIdx, "policy_code"),
+      policy_title: get(f, casesIdx, "policy_title"),
+      decision: get(f, casesIdx, "decision"),
+      key_signals: getArr(f, casesIdx, "key_signals"),
+      reference_weight: get(f, casesIdx, "reference_weight"),
+      status: get(f, casesIdx, "status"),
+      rule_applied_name: get(f, casesIdx, "rule_applied"),
+      visual_summary: get(f, casesIdx, "visual_summary"),
+      asr_text: get(f, casesIdx, "asr_text"),
+      ocr_text: get(f, casesIdx, "ocr_text"),
+      caption_text: get(f, casesIdx, "caption_text"),
+      rationale: get(f, casesIdx, "rationale"),
     };
   }).filter(c => c.status !== "Retired");
 
@@ -492,13 +542,13 @@ async function loadCorpusFromBitable() {
     const f = r.fields || {};
     return {
       record_id: r.recordId || r.record_id,
-      rule_name: cellText(f["rule_name"]),
-      issue: cellText(f["issue"] || f["policy_area"]),
-      policy_title: cellText(f["policy_title"] || f["rule_name"]),
-      rule_description: cellText(f["plain_description"]),
-      rule_text: cellText(f["plain_rule_text"]),
-      examples: cellText(f["example_cases"]),
-      status: cellText(f["status"]),
+      rule_name: get(f, rulesIdx, "rule_name"),
+      issue: get(f, rulesIdx, "issue") || get(f, rulesIdx, "policy_area"),
+      policy_title: get(f, rulesIdx, "policy_title") || get(f, rulesIdx, "rule_name"),
+      rule_description: get(f, rulesIdx, "plain_description"),
+      rule_text: get(f, rulesIdx, "plain_rule_text"),
+      examples: get(f, rulesIdx, "example_cases"),
+      status: get(f, rulesIdx, "status"),
     };
   });
 
@@ -506,15 +556,15 @@ async function loadCorpusFromBitable() {
     const f = r.fields || {};
     return {
       record_id: r.recordId || r.record_id,
-      source_video_id: cellText(f["source_video_id"]),
-      case_id: cellText(f["case_id"]),
-      issue: cellText(f["issue"] || f["policy_area"]),
-      policy_title: cellText(f["policy_title"]),
-      visual_summary: cellText(f["visual_summary"]),
-      asr_text: cellText(f["asr_text"]),
-      ocr_text: cellText(f["ocr_text"]),
-      caption_text: cellText(f["caption_text"]),
-      image_urls: cellArr(f["image_urls"]),
+      source_video_id: get(f, pendingIdx, "source_video_id"),
+      case_id: get(f, pendingIdx, "case_id"),
+      issue: get(f, pendingIdx, "issue") || get(f, pendingIdx, "policy_area"),
+      policy_title: get(f, pendingIdx, "policy_title"),
+      visual_summary: get(f, pendingIdx, "visual_summary"),
+      asr_text: get(f, pendingIdx, "asr_text"),
+      ocr_text: get(f, pendingIdx, "ocr_text"),
+      caption_text: get(f, pendingIdx, "caption_text"),
+      image_urls: get(f, pendingIdx, "image_urls"),
     };
   }).filter(p => p.source_video_id);
 
@@ -528,7 +578,12 @@ async function loadCorpusFromBitable() {
   const titlesByIssue = {}; // issue -> Set
   const allTitlesSet = new Set();
   const addTitle = (issue, t) => {
-    const v = (t == null ? "" : String(t)).trim();
+    if (t == null) return;
+    let v;
+    if (typeof t === "string") v = t.trim();
+    else if (Array.isArray(t)) v = t.map(seg => (seg && (seg.text || seg.name)) || "").join("").trim();
+    else if (typeof t === "object") v = String(t.text || t.name || "").trim();
+    else v = String(t).trim();
     if (!v) return;
     allTitlesSet.add(v);
     const key = (issue || "").trim() || "__any__";
@@ -545,7 +600,11 @@ async function loadCorpusFromBitable() {
       "cases=" + cases.length, "rules=" + rules.length, "pending=" + pending.length,
       "issues=" + issues.length, "titles=" + titles.length,
       "titlesByIssue keys=" + Object.keys(titlesByIssueArr).join(","));
-  } catch(_) {}
+    if (pending.length > 0) {
+      console.log("[CaseReview] pending sample:", pending.slice(0, 3).map(p => p.source_video_id));
+    }
+  } catch (e) {}
+
   return { cases, rules, pending, facets: { issues, titles, titlesByIssue: titlesByIssueArr } };
 }
 
@@ -934,7 +993,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
 
       h("div", { className: "row" },
         h("div", null,
-          h("label", null, "Issue (optional)"),
+          h("label", null, "Issue"),
           h("select", {
             value: inputs.issue || "",
             onChange: e => setF("issue", e.target.value),
@@ -944,7 +1003,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
           ),
         ),
         h("div", null,
-          h("label", null, "Policy title (optional)"),
+          h("label", null, "Policy title"),
           h("select", {
             value: inputs.title || "",
             onChange: e => setF("title", e.target.value),
