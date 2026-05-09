@@ -724,7 +724,7 @@ function buildPayload({ inputs, precedents, topRule, issue }) {
     caption_text: inputs.caption_text || "",
   };
   if (inputs.image_urls && inputs.image_urls.length) {
-    candidate.image_urls = inputs.image_urls.slice(0, 30);
+    candidate.image_urls = (Array.isArray(inputs.image_urls) ? inputs.image_urls : []).slice(0, 30);
   }
   const precs = (precedents || []).map((p, i) => {
     const r = p.raw || {};
@@ -828,7 +828,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
   const addUrl = () => {
     const urls = parseUrls(urlDraft);
     if (!urls.length) return;
-    setF("image_urls", [...(inputs.image_urls || []), ...urls]);
+    setF("image_urls", [...((Array.isArray(inputs.image_urls) ? inputs.image_urls : [])), ...urls]);
     setUrlDraft("");
   };
   const clearUrls = () => setF("image_urls", []);
@@ -837,7 +837,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
   const [visionReply, setVisionReply] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
   const buildVisionPrompt = () => {
-    const urls = inputs.image_urls || [];
+    const urls = (Array.isArray(inputs.image_urls) ? inputs.image_urls : []);
     if (!urls.length) return "";
     const numbered = urls.map((u, i) => `${i + 1}. ${u}`).join("\n");
     const ctx = [
@@ -887,7 +887,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
   // -------------------------------------------------------------
 
   const removeUrl = (i) => {
-    const next = [...(inputs.image_urls || [])];
+    const next = [...((Array.isArray(inputs.image_urls) ? inputs.image_urls : []))];
     next.splice(i, 1);
     setF("image_urls", next);
   };
@@ -896,7 +896,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "")),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.3"),
 
       h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
