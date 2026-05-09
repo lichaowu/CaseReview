@@ -102,9 +102,15 @@
   }
   if (!mod) {
     window.__bitableSdkError = String(lastErr && lastErr.message || lastErr || "unknown");
+    console.error("[CaseReview] SDK load failed:", lastErr);
   } else {
-    // Expose the imported bitable namespace so the non-module loader can see it.
-    window.bitable = mod.bitable || mod.default || mod;
+    // Try common export shapes
+    const candidate = mod.bitable || mod.default || mod;
+    window.bitable = candidate;
+    window.__sdkModule = mod;  // expose for debugging
+    console.log("[CaseReview] SDK module keys:", Object.keys(mod));
+    console.log("[CaseReview] window.bitable keys:", candidate ? Object.keys(candidate) : "(empty)");
+    console.log("[CaseReview] window.bitable.base:", candidate && candidate.base);
   }
   window.dispatchEvent(new Event("bitable-sdk-ready"));
 </script>
@@ -838,6 +844,7 @@ function ReasonedVerdict({ v }) {
 }
 
 function App() {
+  // Lightweight wrapper: loads corpus, then mounts MainApp with stable hook list.
   const [corpus, setCorpus] = useState(null);
   const [corpusError, setCorpusError] = useState("");
   const [corpusLoading, setCorpusLoading] = useState(true);
@@ -853,12 +860,15 @@ function App() {
     })();
     return () => { cancelled = true; };
   }, []);
-
   if (corpusLoading) return h("div", { style: { padding: 24, fontSize: 13 } }, "Loading corpus from Base…");
   if (corpusError) return h("div", { style: { padding: 24, fontSize: 13, color: "#d1242f" } },
     "Failed to load corpus: ", corpusError, h("br"), h("br"),
     h("span", { className: "muted" }, "Make sure this plugin is opened from inside a Base whose tables match the configured names."));
   if (!corpus) return null;
+  return h(MainApp, { corpus });
+}
+
+function MainApp({ corpus }) {
 
   const [inputs, setInputs] = useState({
     item_id: "",
@@ -1060,7 +1070,12 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+try {
+        ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+      } catch (e) {
+        console.error("[CaseReview] React render failed:", e);
+        document.getElementById("root").innerHTML = '<pre style="padding:24px;color:#d1242f;font:12px ui-monospace,monospace;white-space:pre-wrap;">React render error: ' + (e && e.stack || e) + '</pre>';
+      }
 </script>
 </body>
 </html>
