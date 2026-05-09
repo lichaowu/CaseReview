@@ -406,7 +406,7 @@ const CFG = (typeof window !== "undefined" && window.CASE_REVIEW_CONFIG) || {};
 const CASES_NAMES = (CFG.casesTableNames && CFG.casesTableNames.length) ? CFG.casesTableNames : ["Cases", "case_notes", "Case Notes", "cases"];
 const RULES_NAMES = (CFG.rulesTableNames && CFG.rulesTableNames.length) ? CFG.rulesTableNames : ["Rules", "rule_book", "Rule Book", "rules"];
 const PENDING_NAMES = (CFG.pendingTableNames && CFG.pendingTableNames.length) ? CFG.pendingTableNames : ["Pending Cases", "pending_cases", "Pending", "pending"];
-const ISSUE_FALLBACK = ["NSA", "VBDA", "HRA", "HHB", "SGC", "IPV", "Misinfo", "Spam", "Other"];
+const ISSUE_FALLBACK = ["NSA", "VBDA", "HRA", "HHB", "SGC", "EA"];
 
 async function findTableByNames(base, candidates) {
   // SDK: getTableList returns ITable[]; each has getName() and id
@@ -506,8 +506,8 @@ async function loadCorpusFromBitable() {
     const f = r.fields || {};
     return {
       record_id: r.recordId || r.record_id,
-      case_id: cellText(f["case_id"]),
       source_video_id: cellText(f["source_video_id"]),
+      case_id: cellText(f["case_id"]),
       issue: cellText(f["issue"] || f["policy_area"]),
       policy_title: cellText(f["policy_title"]),
       visual_summary: cellText(f["visual_summary"]),
@@ -516,7 +516,7 @@ async function loadCorpusFromBitable() {
       caption_text: cellText(f["caption_text"]),
       image_urls: cellArr(f["image_urls"]),
     };
-  }).filter(p => p.case_id);
+  }).filter(p => p.source_video_id);
 
   // Distinct facets for filter dropdowns
   const issuesSet = new Set();
@@ -832,9 +832,9 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
       h("div", { className: "meta-row" },
         `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "")),
 
-      h("label", null, "Case ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
+      h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
-        type: "text", value: inputs.item_id, placeholder: "case_id or rec...",
+        type: "text", value: inputs.item_id, placeholder: "source_video_id, case_id, or rec...",
         list: "pending-case-ids",
         onChange: e => {
           const v = e.target.value;
@@ -846,7 +846,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
         (pendingIds || []).map(id => h("option", { key: id, value: id })),
       ),
       pendingHit && h("div", { className: "hint", style: { color: "var(--primary)", fontWeight: 500 } },
-        `↳ Loaded from Pending Cases · ${pendingHit}`),
+        `↳ Loaded from Pending Cases · source_video_id ${pendingHit}`),
 
       h("label", null, "Visual summary"),
       h("textarea", {
@@ -1217,7 +1217,7 @@ function MainApp({ corpus }) {
   const index = useMemo(() => buildIndex(corpus.cases), [corpus]);
   const pendingMap = useMemo(() => {
     const m = new Map();
-    (corpus.pending || []).forEach(p => { if (p.case_id) m.set(p.case_id, p); });
+    (corpus.pending || []).forEach(p => { if (p.source_video_id) m.set(p.source_video_id, p); });
     return m;
   }, [corpus]);
   const pendingIds = useMemo(() => Array.from(pendingMap.keys()).sort(), [pendingMap]);
@@ -1237,15 +1237,17 @@ function MainApp({ corpus }) {
     const p = pendingMap.get(id);
     if (!p) { setPendingHit(""); return; }
     setPendingHit(id);
-    setInputs(s => ({
-      ...s,
-      visual_summary: p.visual_summary || s.visual_summary,
-      asr_text: p.asr_text || s.asr_text,
-      ocr_text: p.ocr_text || s.ocr_text,
-      caption_text: p.caption_text || s.caption_text,
-      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : s.image_urls,
-      issue: p.issue || s.issue,
-      title: p.policy_title || s.title,
+    setInputs(prev => ({
+      ...prev,
+      // item_id stays as the source_video_id the user typed
+      case_id_ref: p.case_id || "",
+      visual_summary: p.visual_summary || prev.visual_summary,
+      asr_text: p.asr_text || prev.asr_text,
+      ocr_text: p.ocr_text || prev.ocr_text,
+      caption_text: p.caption_text || prev.caption_text,
+      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : prev.image_urls,
+      issue: p.issue || prev.issue,
+      title: p.policy_title || prev.title,
     }));
   }, [pendingMap]);
 
