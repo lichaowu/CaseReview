@@ -564,7 +564,7 @@ async function loadCorpusFromBitable() {
       asr_text: get(f, pendingIdx, "asr_text"),
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
-      image_urls: get(f, pendingIdx, "image_urls"),
+      image_urls: (function(){ var raw = readCell(f, pendingIdx, "image_urls"); if (raw == null) return []; if (Array.isArray(raw)) return raw.map(x => (typeof x === "string" ? x : (x && (x.text||x.name||x.link||x.url)) || "")).filter(Boolean); if (typeof raw === "object") { var t = raw.text || raw.name || raw.link || raw.url; return t ? [String(t)] : []; } return String(raw).split(/[\s,;\n]+/).map(x=>x.trim()).filter(Boolean); })(),
     };
   }).filter(p => p.source_video_id);
 
@@ -953,7 +953,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
       ),
       (inputs.image_urls && inputs.image_urls.length > 0) &&
         h("div", { className: "thumbs" },
-          inputs.image_urls.map((u, i) =>
+          (Array.isArray(inputs.image_urls) ? inputs.image_urls : []).map((u, i) =>
             h(Thumb, { key: i, idx: i, url: u, onRemove: () => removeUrl(i) }),
           ),
         ),
