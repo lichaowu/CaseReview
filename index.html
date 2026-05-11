@@ -1088,6 +1088,43 @@ const LOG_RING = [];
 })();
 window.__getLogRing = () => LOG_RING.slice();
 
+
+// V2.7.1: clipboard helper that survives Bitable's Permissions-Policy block.
+// Tries navigator.clipboard.writeText, then falls back to execCommand('copy')
+// on a hidden textarea. Returns a Promise<boolean>.
+async function safeCopy(text) {
+  text = String(text == null ? "" : text);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    // permissions-policy block or transient — fall through to legacy path
+    try { console.warn("[CaseReview] clipboard API blocked; using execCommand fallback:", e && e.message || e); } catch(_){}
+  }
+  try {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    ta.style.pointerEvents = "none";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch(_) { ok = false; }
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) {
+    try { console.error("[CaseReview] execCommand copy fallback failed:", e && e.message || e); } catch(_){}
+    return false;
+  }
+}
+window.__safeCopy = safeCopy;
+
 // ---------- Components ----------
 function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
@@ -1332,7 +1369,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V2.7.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V2.7.1")),
     );
   }
   if (corpusError) {
@@ -1343,7 +1380,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V2.7.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V2.7.1")),
     );
   }
   if (!corpus) return null;
@@ -1458,9 +1495,7 @@ function MainApp({ corpus, onReloadCorpus }) {
     const txt = JSON.stringify(payload, null, 2);
     setPayloadJson(txt);
     setReasoningCopied(false);
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(() => setReasoningCopied(true), () => setReasoningCopied(false));
-    }
+    safeCopy(txt).then(ok => setReasoningCopied(!!ok));
   }, [result, inputs]);
 
   const onParseReply = useCallback(() => {
@@ -1498,7 +1533,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V2.7.0"),
+      "build V2.7.1"),
   );
 
   // ---- Views ----
@@ -1679,7 +1714,7 @@ function CaseView({
         h("div", { className: "row tight", style: { marginBottom: 8 } },
           h("button", { className: "secondary", onClick: onBuildPayload },
             reasoningCopied ? "✓ Copied" : "Build & copy"),
-          payloadJson && h("button", { className: "secondary tiny", onClick: () => { navigator.clipboard && navigator.clipboard.writeText(payloadJson); } }, "Copy again"),
+          payloadJson && h("button", { className: "secondary tiny", onClick: () => { safeCopy(payloadJson); } }, "Copy again"),
         ),
         payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
           payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION),
@@ -1735,7 +1770,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { try { navigator.clipboard.writeText("V2.7.0"); } catch(_){} };
+  const copyStamp = () => { safeCopy("V2.7.1"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -1744,7 +1779,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V2.7.0")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V2.7.1")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
