@@ -552,7 +552,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
-  try { console.log("[CaseReview] V2.5.6 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
+  try { console.log("[CaseReview] V2.5.7 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -597,7 +597,20 @@ async function loadCorpusFromBitable() {
               // Decode \u0026 -> & and similar before regex
               var decoded = str.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
               var matches = decoded.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
-              if (matches && matches.length) pushAll(matches);
+              if (matches && matches.length) {
+                // Bitable text cells truncate at ~50k chars. If JSON.parse failed, the last URL is likely truncated.
+                // Drop trailing URLs that look incomplete: missing x-signature or ending with stray % / & (signature truncated).
+                var jsonFailed = (str.charAt(0) === "[" || str.charAt(0) === "{");
+                if (jsonFailed && matches.length > 0) {
+                  var last = matches[matches.length - 1];
+                  var looksTruncated = !/x-signature=[^&\s]+/.test(last) || /[%&]$/.test(last) || /%[0-9A-Fa-f]?$/.test(last);
+                  if (looksTruncated) {
+                    try { console.warn("[CaseReview] dropping truncated trailing URL:", last.slice(-60)); } catch(_){}
+                    matches = matches.slice(0, -1);
+                  }
+                }
+                pushAll(matches);
+              }
             }
           }
         }
@@ -939,7 +952,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.6"),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.7"),
 
       h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
