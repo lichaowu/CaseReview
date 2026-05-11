@@ -566,35 +566,46 @@ async function loadCorpusFromBitable() {
       caption_text: get(f, pendingIdx, "caption_text"),
       image_urls: (function(){
         var raw = readCell(f, pendingIdx, "image_urls");
-        if (raw == null) return [];
-        // Array-of-segments / array-of-strings (SDK shape)
-        if (Array.isArray(raw)) {
-          return raw.map(x => (typeof x === "string" ? x : (x && (x.text||x.name||x.link||x.url)) || "")).filter(Boolean);
-        }
-        if (typeof raw === "object") {
-          var t = raw.text || raw.name || raw.link || raw.url;
-          if (t) return [String(t)];
-        }
-        var str = String(raw).trim();
-        if (!str) return [];
-        // 1) Try JSON parse (handles '["url1","url2"]' with \u0026 encoded ampersands)
-        if (str.charAt(0) === "[" || str.charAt(0) === "{") {
-          try {
-            var parsed = JSON.parse(str);
-            if (Array.isArray(parsed)) {
-              return parsed.map(x => (typeof x === "string" ? x : (x && (x.text||x.url||x.link)) || "")).filter(Boolean);
+        var out = [];
+        var pushAll = function(arr){ if (Array.isArray(arr)) arr.forEach(function(x){ if (x != null) out.push(x); }); };
+        if (raw == null) { /* empty */ }
+        else if (Array.isArray(raw)) {
+          pushAll(raw.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.name||x.link||x.url)) || ""; }));
+        } else if (typeof raw === "object") {
+          var t0 = raw.text || raw.name || raw.link || raw.url;
+          if (t0) out.push(String(t0));
+        } else {
+          var str = String(raw).trim();
+          if (str) {
+            var consumed = false;
+            // 1) JSON parse (handles '["url1","url2"]' with \u0026 encoded ampersands)
+            if (str.charAt(0) === "[" || str.charAt(0) === "{") {
+              try {
+                var parsed = JSON.parse(str);
+                if (Array.isArray(parsed)) {
+                  pushAll(parsed.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.url||x.link)) || ""; }));
+                  consumed = true;
+                } else if (parsed && typeof parsed === "object") {
+                  var tv = parsed.text || parsed.url || parsed.link;
+                  if (tv) { out.push(String(tv)); consumed = true; }
+                }
+              } catch (e) { /* fall through */ }
             }
-            if (parsed && typeof parsed === "object") {
-              var tv = parsed.text || parsed.url || parsed.link;
-              return tv ? [String(tv)] : [];
+            // 2) Regex-extract every http(s):// URL — also runs as fallback when JSON.parse fails on truncated input
+            if (!consumed) {
+              // Decode \u0026 -> & and similar before regex
+              var decoded = str.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+              var matches = decoded.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
+              if (matches && matches.length) pushAll(matches);
             }
-          } catch (e) { /* fall through */ }
+          }
         }
-        // 2) Regex-extract every http(s):// URL (most robust for messy text)
-        var matches = str.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
-        if (matches && matches.length) return matches;
-        // 3) Last-resort split on whitespace/comma/semicolon/newline
-        return str.split(/[\s,;\n]+/).map(x => x.trim()).filter(Boolean);
+        // STRICT FILTER: only keep absolute http(s) URLs — no fragments, no relative paths
+        var clean = out
+          .map(function(u){ return (typeof u === "string") ? u.trim() : ""; })
+          .filter(function(u){ return /^https?:\/\//i.test(u); });
+        try { console.log("[CaseReview] image_urls parsed for", get(f, pendingIdx, "source_video_id"), ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw len:", (typeof raw === "string" ? raw.length : (Array.isArray(raw) ? raw.length : "n/a"))); } catch(e) {}
+        return clean;
       })(),
     };
   }).filter(p => p.source_video_id);
@@ -927,7 +938,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.4"),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.5"),
 
       h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
