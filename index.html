@@ -27,11 +27,7 @@
     --surface-card:#efe9de;
     --surface-cream-strong:#e8e0d2;
     --surface-dark:#181715;
-    --surface-dark-elevated:#252320;
-    --surface-dark-soft:#1f1e1b;
     --on-primary:#ffffff;
-    --on-dark:#faf9f5;
-    --on-dark-soft:#a09d96;
     --accent-teal:#5db8a6;
     --accent-amber:#e8a55a;
     --success:#5db872;
@@ -41,84 +37,154 @@
     --serif: "Cormorant Garamond", "Tiempos Headline", Garamond, "Times New Roman", serif;
     --sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
     --mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    /* V2.7.0 density tokens */
+    --gutter: 8px;
+    --pad: 12px;
+    --fs-base: 13px;
+    --fs-meta: 12px;
+    --fs-mono: 11px;
+    --lh: 1.4;
+    --header-h: 40px;
+    --footer-h: 26px;
+    --actionbar-h: 56px;
   }
   * { box-sizing: border-box; }
   html, body {
     margin:0; padding:0; background:var(--canvas); color:var(--body);
-    font-family: var(--sans); font-size:14px; line-height:1.55;
+    font-family: var(--sans); font-size: var(--fs-base); line-height: var(--lh);
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    height: 100vh; overflow: hidden;
   }
   ::selection { background: rgba(204,120,92,0.25); }
 
-  /* ---- Layout ---- */
-  .root {
-    display:grid; grid-template-columns: 400px 1fr; gap:24px;
-    padding:24px; height:100vh;
-  }
-  @media (max-width: 1024px) { .root { grid-template-columns: 1fr; height:auto; } }
-
-  /* ---- Panel (cream card) ---- */
-  .panel {
+  /* ---- V2.7.0 Shell: stacked, narrow-panel-first ---- */
+  #root { height: 100vh; display: flex; flex-direction: column; }
+  .shell {
+    display: flex; flex-direction: column;
+    height: 100vh;
     background: var(--canvas);
-    border: 1px solid var(--hairline);
-    border-radius: 12px;
-    overflow:auto;
   }
-  .panel .head {
-    padding: 18px 24px;
+  .shell-header {
+    flex: 0 0 var(--header-h);
+    height: var(--header-h);
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 var(--pad);
     border-bottom: 1px solid var(--hairline);
     background: var(--canvas);
-    color: var(--ink);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .shell-header .title {
+    flex: 1 1 auto;
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 22px;
-    letter-spacing: -0.3px;
-    line-height: 1.3;
-    position: sticky; top: 0; z-index: 2;
+    font-size: 16px;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .panel .body { padding: 20px 24px; }
+  .shell-header .nav-btn {
+    height: 28px; min-width: 28px;
+    padding: 0 8px;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .shell-header .nav-btn:hover { background: var(--surface-soft); border-color: var(--hairline); }
+  .shell-body {
+    flex: 1 1 auto;
+    overflow-y: auto; overflow-x: hidden;
+    padding: var(--pad);
+    padding-bottom: calc(var(--pad) + var(--actionbar-h)); /* room for sticky action bar */
+  }
+  .shell-body.no-actionbar { padding-bottom: var(--pad); }
+  .shell-footer {
+    flex: 0 0 var(--footer-h);
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 var(--pad);
+    border-top: 1px solid var(--hairline);
+    background: var(--canvas);
+    font-size: var(--fs-mono);
+    color: var(--muted);
+    line-height: 1;
+    z-index: 9;
+  }
+  .shell-footer .stamp {
+    font-family: var(--mono);
+    color: var(--muted-soft);
+    cursor: pointer;
+  }
+  .shell-footer .stamp:hover { color: var(--primary); }
+
+  /* ---- Sticky action bar (Case view bottom) ---- */
+  .actionbar {
+    position: fixed;
+    left: 0; right: 0;
+    bottom: var(--footer-h);
+    height: var(--actionbar-h);
+    background: var(--canvas);
+    border-top: 1px solid var(--hairline);
+    padding: var(--gutter) var(--pad);
+    display: flex; gap: var(--gutter); align-items: center;
+    z-index: 8;
+    box-shadow: 0 -2px 8px rgba(20,20,19,0.04);
+  }
+  .actionbar > .grow { flex: 1 1 auto; min-width: 0; }
+  .actionbar .summary {
+    font-size: var(--fs-meta); color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .actionbar .summary b { color: var(--ink); font-weight: 500; }
 
   /* ---- Form controls ---- */
   label {
-    display:block;
-    margin: 14px 0 6px;
+    display: block;
+    margin: 10px 0 4px;
     font-family: var(--sans);
     font-weight: 500;
     color: var(--body-strong);
-    font-size: 13px;
-    letter-spacing: 0;
+    font-size: var(--fs-meta);
   }
   input[type=text], textarea, select {
-    width:100%;
-    padding: 10px 14px;
+    width: 100%;
+    padding: 7px 10px;
     border: 1px solid var(--hairline);
-    border-radius: 8px;
+    border-radius: 6px;
     background: #fff;
     color: var(--ink);
-    font: 400 14px/1.5 var(--sans);
+    font: 400 var(--fs-base)/var(--lh) var(--sans);
     transition: border-color .15s ease, box-shadow .15s ease;
   }
   input[type=text]:focus, textarea:focus, select:focus {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(204,120,92,0.15);
+    box-shadow: 0 0 0 2px rgba(204,120,92,0.15);
   }
-  textarea { resize: vertical; min-height: 60px; font-family: var(--sans); }
+  textarea { resize: vertical; min-height: 48px; font-family: var(--sans); }
 
-  .row { display:flex; gap:10px; align-items:center; }
-  .row > * { flex:1; }
+  .row { display: flex; gap: var(--gutter); align-items: stretch; }
+  .row > * { flex: 1; min-width: 0; }
+  .row.tight { gap: 6px; }
 
   /* ---- Buttons ---- */
   button {
     background: var(--primary);
     color: var(--on-primary);
     border: 0;
-    border-radius: 8px;
-    padding: 10px 20px;
-    height: 40px;
-    font: 500 14px/1 var(--sans);
+    border-radius: 6px;
+    padding: 8px 14px;
+    height: 34px;
+    font: 500 var(--fs-base)/1 var(--sans);
     cursor: pointer;
     transition: background .15s ease, transform .05s ease;
+    white-space: nowrap;
   }
   button:hover:not(:disabled) { background: var(--primary-active); }
   button:active:not(:disabled) { transform: translateY(1px); }
@@ -131,100 +197,143 @@
     background: var(--surface-soft);
     border-color: var(--muted-soft);
   }
+  button.tiny {
+    height: 26px; padding: 0 8px;
+    font-size: var(--fs-mono);
+    border-radius: 4px;
+  }
   button:disabled {
     background: var(--primary-disabled);
     color: var(--muted);
     cursor: not-allowed;
   }
+  button.full { width: 100%; }
 
   .hint {
-    font-size: 12px;
+    font-size: var(--fs-meta);
     color: var(--muted);
     margin-top: 4px;
-    line-height: 1.5;
+    line-height: 1.45;
   }
   .divider {
     height: 1px;
     background: var(--hairline-soft);
-    margin: 18px 0;
+    margin: 12px 0;
     border: 0;
   }
 
-  /* ---- Thumbnails ---- */
-  .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-  .thumbs .thumb {
-    width: 76px; height: 76px;
+  /* ---- Queue cards ---- */
+  .queue-list { display: flex; flex-direction: column; gap: 8px; }
+  .queue-card {
+    display: flex; gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--canvas);
+    cursor: pointer;
+    transition: border-color .15s ease, transform .05s ease, background .15s ease;
+  }
+  .queue-card:hover { border-color: var(--primary); background: var(--surface-soft); }
+  .queue-card:active { transform: translateY(1px); }
+  .queue-card .qc-thumb {
+    flex: 0 0 56px;
+    width: 56px; height: 56px;
+    border-radius: 6px;
+    background: var(--surface-soft);
+    border: 1px solid var(--hairline-soft);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--muted);
+  }
+  .queue-card .qc-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .queue-card .qc-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .queue-card .qc-id {
+    font-family: var(--mono); font-size: var(--fs-mono); color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .queue-card .qc-title {
+    font-size: var(--fs-meta); color: var(--body);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .queue-card .qc-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .queue-card .qc-age { font-size: var(--fs-mono); color: var(--muted); }
+
+  /* ---- Carousel (prev/next + dots) ---- */
+  .carousel { margin: 8px 0; }
+  .carousel .car-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/10;
+    background: var(--surface-soft);
     border: 1px solid var(--hairline);
     border-radius: 8px;
     overflow: hidden;
-    background: var(--surface-soft);
-    display:flex; align-items:center; justify-content:center;
-    font-size:11px; color:var(--muted);
-    position:relative; cursor:pointer;
-    transition: border-color .15s ease, transform .15s ease;
+    display: flex; align-items: center; justify-content: center;
   }
-  .thumbs .thumb:hover {
-    border-color: var(--primary);
-    transform: translateY(-1px);
+  .carousel .car-frame img {
+    width: 100%; height: 100%; object-fit: contain;
+    display: block;
   }
-  .thumbs .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-  .thumbs .thumb .thumb-fallback {
-    font-size:11px; color:var(--muted); padding:0 4px; text-align:center;
+  .carousel .car-fallback {
+    font-size: var(--fs-meta); color: var(--muted);
+    padding: 16px; text-align: center;
   }
-  .thumbs .thumb .x {
-    position:absolute; top:-6px; right:-6px;
-    background:#fff; border:1px solid var(--hairline);
-    width:18px; height:18px; border-radius:9999px;
-    font-size:11px; line-height:16px; text-align:center; cursor:pointer;
-    z-index:2; color: var(--ink);
-    box-shadow: 0 1px 3px rgba(20,20,19,0.08);
+  .carousel .car-controls {
+    position: absolute; top: 50%; left: 0; right: 0;
+    transform: translateY(-50%);
+    display: flex; justify-content: space-between;
+    pointer-events: none;
+    padding: 0 6px;
   }
-  .thumbs .thumb .x:hover { color: var(--error); border-color: var(--error); }
-
-  .vision-row {
-    margin-top: 12px;
-    padding: 14px;
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    background: var(--surface-soft);
-  }
-  .vision-row label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-  .copy-msg {
-    font-size: 12px;
-    color: var(--primary);
-    margin-top: 8px;
-    font-weight: 500;
-  }
-
-  /* ---- Tables ---- */
-  table { width:100%; border-collapse:collapse; font-size: 13px; }
-  th, td {
-    text-align:left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--hairline-soft);
-    vertical-align: top;
-    color: var(--body);
-  }
-  th {
-    background: transparent;
-    font-family: var(--sans);
-    font-weight: 500;
-    color: var(--muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
-    border-bottom: 1px solid var(--hairline);
-  }
-  tr { transition: background .12s ease; cursor: pointer; }
-  tr:hover td { background: var(--surface-soft); }
-  tr.sel td { background: var(--surface-card); color: var(--ink); }
-
-  /* ---- Tags / Badges (pill) ---- */
-  .tag {
-    display:inline-block;
-    padding: 3px 10px;
+  .carousel .car-btn {
+    pointer-events: auto;
+    width: 28px; height: 28px; padding: 0;
     border-radius: 9999px;
-    font-size: 11px;
+    background: rgba(20,20,19,0.55);
+    color: #fff;
+    border: 0;
+    font-size: 14px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .carousel .car-btn:hover { background: rgba(20,20,19,0.75); }
+  .carousel .car-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .carousel .car-counter {
+    position: absolute; top: 6px; right: 8px;
+    font-size: var(--fs-mono);
+    color: #fff;
+    background: rgba(20,20,19,0.55);
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-family: var(--mono);
+  }
+  .carousel .car-dots {
+    display: flex; gap: 4px; justify-content: center;
+    margin-top: 6px; flex-wrap: wrap;
+  }
+  .carousel .car-dot {
+    width: 6px; height: 6px; border-radius: 9999px;
+    background: var(--hairline);
+    border: 0; padding: 0;
+    cursor: pointer;
+    transition: background .15s ease, transform .15s ease;
+  }
+  .carousel .car-dot.active { background: var(--primary); transform: scale(1.3); }
+  .carousel .car-dot:hover { background: var(--muted-soft); }
+  .carousel .car-open {
+    display: block; text-align: center;
+    margin-top: 4px; font-size: var(--fs-mono);
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .carousel .car-open:hover { color: var(--primary); }
+
+  /* ---- Tags / Badges ---- */
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: var(--fs-mono);
     font-weight: 500;
     line-height: 1.4;
     letter-spacing: 0.2px;
@@ -240,112 +349,213 @@
   .tag.linked  { background:#dbeee8; color:#1f5448; }
   .tag.unlinked{ background:#f4e0c4; color:#7a4a0e; }
   .tag.draft   { background:#ebe1d2; color:#5b4423; }
+  .tag.pending { background:#e8e0d2; color:#5b4423; }
 
-  /* ---- Cards ---- */
+  /* ---- Cards & sections ---- */
+  .section {
+    margin-bottom: 12px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--canvas);
+    overflow: hidden;
+  }
+  .section .sec-head {
+    padding: 8px 12px;
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--hairline-soft);
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--ink);
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .section .sec-head .chev {
+    color: var(--muted);
+    font-size: 11px;
+    transition: transform .15s ease;
+  }
+  .section.open .sec-head .chev { transform: rotate(90deg); }
+  .section .sec-body { padding: 10px 12px; }
+  .section.collapsed .sec-body { display: none; }
+
   .card {
     border: 1px solid var(--hairline);
-    border-radius: 12px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
     background: var(--canvas);
   }
   .card h4 {
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 18px;
+    font-size: 14px;
     color: var(--ink);
-    letter-spacing: -0.2px;
   }
-  .card .kvp {
-    font-size: 13px;
-    color: var(--body);
-    margin-bottom: 6px;
-    line-height: 1.55;
-  }
+  .card .kvp { font-size: var(--fs-meta); color: var(--body); margin-bottom: 4px; line-height: 1.45; }
   .card .kvp b { color: var(--ink); font-weight: 500; }
   .card pre {
-    margin: 8px 0 0;
+    margin: 6px 0 0;
     background: var(--surface-soft);
-    padding: 10px 12px;
-    border-radius: 8px;
+    padding: 8px;
+    border-radius: 6px;
     border: 1px solid var(--hairline-soft);
     font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: var(--fs-mono);
+    line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
     color: var(--body-strong);
   }
 
+  /* ---- Definition lists for stacked metadata ---- */
+  dl.dl-stack { margin: 0; display: grid; grid-template-columns: 36% 64%; gap: 4px 8px; font-size: var(--fs-meta); }
+  dl.dl-stack dt { color: var(--muted); font-size: var(--fs-mono); text-transform: uppercase; letter-spacing: 1px; }
+  dl.dl-stack dd { margin: 0; color: var(--body); word-break: break-word; }
+
   /* ---- Banners ---- */
   .banner {
-    padding: 14px 16px;
-    border-radius: 8px;
-    margin-bottom: 14px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 10px;
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--fs-meta);
     border: 1px solid transparent;
+    line-height: 1.45;
   }
   .banner.aligned   { background: #dff0d8; color: #2a6e35; border-color: #c8e2c0; }
   .banner.mixed     { background: #f4e9c8; color: #6b5316; border-color: #e6d6a4; }
   .banner.no-match  { background: var(--surface-soft); color: var(--muted); border-color: var(--hairline); }
 
   .muted { color: var(--muted); }
-  .mono  { font-family: var(--mono); font-size: 12px; }
+  .mono  { font-family: var(--mono); font-size: var(--fs-mono); }
 
-  /* ---- Decision box (signature coral callout) ---- */
+  /* ---- Decision box ---- */
   .decision-box {
     border: 1px solid var(--hairline);
     background: var(--surface-card);
-    padding: 20px 22px;
-    border-radius: 12px;
-    margin-top: 14px;
+    padding: 12px;
+    border-radius: 8px;
   }
+  .decision-box h4 { margin: 0 0 8px; font-family: var(--serif); font-weight: 500; font-size: 14px; }
   .decision-box .d-row {
-    display:flex; gap:16px; margin: 6px 0;
-    font-size: 14px; line-height: 1.55;
-    align-items: baseline;
+    display: flex; gap: 8px; margin: 4px 0;
+    font-size: var(--fs-meta); line-height: 1.45;
+    align-items: baseline; flex-wrap: wrap;
   }
   .decision-box .d-row b {
-    min-width: 120px;
+    min-width: 90px;
     color: var(--muted);
     font-weight: 500;
-    font-size: 11px;
+    font-size: var(--fs-mono);
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 1px;
   }
 
-  details { margin: 8px 0; }
+  details { margin: 6px 0; }
   summary {
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     color: var(--muted);
     user-select: none;
-    padding: 4px 0;
+    padding: 2px 0;
   }
   summary:hover { color: var(--primary); }
-  .meta-row {
-    font-size: 12px;
-    color: var(--muted);
-    margin: 6px 0;
-    line-height: 1.5;
+  .meta-row { font-size: var(--fs-meta); color: var(--muted); margin: 4px 0; line-height: 1.45; }
+
+  /* ---- Precedent list (compact) ---- */
+  .prec-list { display: flex; flex-direction: column; gap: 6px; }
+  .prec-item {
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    background: var(--canvas);
+    overflow: hidden;
   }
-  .toolbar { display:flex; gap:10px; align-items:center; }
+  .prec-item.selected { border-color: var(--primary); }
+  .prec-item .prec-head {
+    display: flex; gap: 6px; align-items: center;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: var(--fs-meta);
+  }
+  .prec-item .prec-head:hover { background: var(--surface-soft); }
+  .prec-item .prec-head .prec-id { font-family: var(--mono); font-size: var(--fs-mono); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prec-item .prec-body { padding: 8px 10px; border-top: 1px solid var(--hairline-soft); display: none; }
+  .prec-item.open .prec-body { display: block; }
+
+  /* ---- Diagnostics ---- */
+  .diag-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
+  .diag-table td, .diag-table th {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--hairline-soft);
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+  .diag-table th {
+    color: var(--muted); font-size: var(--fs-mono);
+    text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 500;
+  }
+  .log-list {
+    max-height: 240px; overflow-y: auto;
+    font-family: var(--mono); font-size: var(--fs-mono);
+    background: var(--surface-soft);
+    border: 1px solid var(--hairline-soft);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .log-list .log-row { padding: 2px 0; line-height: 1.45; word-break: break-word; }
+  .log-list .log-row.warn { color: #8a6515; }
+  .log-list .log-row.error { color: #8a2c1a; }
+  .log-list .log-ts { color: var(--muted-soft); margin-right: 6px; }
+
+  /* ---- Menu (header overflow) ---- */
+  .menu-wrap { position: relative; }
+  .menu-pop {
+    position: absolute; top: 32px; right: 0;
+    min-width: 160px;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.08);
+    z-index: 20;
+    overflow: hidden;
+  }
+  .menu-pop button {
+    width: 100%;
+    background: transparent; color: var(--ink);
+    border: 0; border-radius: 0;
+    text-align: left;
+    padding: 8px 12px;
+    height: auto;
+    font-size: var(--fs-base);
+  }
+  .menu-pop button:hover { background: var(--surface-soft); }
+
+  .copy-msg {
+    font-size: var(--fs-mono);
+    color: var(--primary);
+    margin-top: 6px;
+    font-weight: 500;
+  }
 
   /* ---- Scrollbar polish ---- */
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
     background: var(--hairline);
     border-radius: 9999px;
-    border: 2px solid var(--canvas);
   }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted-soft); }
 
-  /* v2.5.2 filter row alignment */
-  .row { align-items: flex-end; }
-  .row > div > label { display:block; min-height: 1.4em; line-height: 1.4em; }
+  /* ---- Wide-screen comfort (>=720px popped-out) ---- */
+  @media (min-width: 720px) {
+    .shell-body { padding: 16px 20px; padding-bottom: calc(20px + var(--actionbar-h)); }
+    .actionbar { padding: 10px 20px; }
+  }
 </style>
 </head>
 <body>
@@ -851,296 +1061,114 @@ function tryParseReasonedJson(raw) {
   }
 }
 
+// ---------- V2.7.0: in-memory log ring buffer (for Diagnostics view) ----------
+const LOG_RING_CAP = 200;
+const LOG_RING = [];
+(function installLogTap(){
+  if (window.__caseReviewLogTapInstalled) return;
+  window.__caseReviewLogTapInstalled = true;
+  const wrap = (level, orig) => function(){
+    try {
+      const args = Array.from(arguments);
+      const text = args.map(a => {
+        if (a == null) return String(a);
+        if (typeof a === "string") return a;
+        try { return JSON.stringify(a); } catch(_) { return String(a); }
+      }).join(" ");
+      LOG_RING.push({ ts: Date.now(), level, text });
+      if (LOG_RING.length > LOG_RING_CAP) LOG_RING.splice(0, LOG_RING.length - LOG_RING_CAP);
+    } catch(_) {}
+    try { return orig.apply(console, arguments); } catch(_) {}
+  };
+  const o = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+  console.log   = wrap("log",   o.log);
+  console.warn  = wrap("warn",  o.warn);
+  console.error = wrap("error", o.error);
+  console.info  = wrap("info",  o.info);
+})();
+window.__getLogRing = () => LOG_RING.slice();
+
 // ---------- Components ----------
 function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
 }
 
-function Thumb({ url, onRemove, idx }) {
-  const [err, setErr] = useState(false);
-  // Open the URL in a new tab on click — gives user a manual fallback when CDN
-  // blocks hotlinking from the Mira sandbox iframe origin.
-  const open = (e) => { e.stopPropagation(); window.open(url, "_blank", "noopener,noreferrer"); };
-  return h("div", { className: "thumb", onClick: open, title: url },
-    !err
-      ? h("img", {
-          src: url,
-          onError: () => setErr(true),
-          alt: "",
-          referrerPolicy: "no-referrer",
-          loading: "lazy",
-        })
-      : h("span", { className: "thumb-fallback" }, `#${(idx ?? 0) + 1} ↗`),
-    onRemove && h("span", {
-      className: "x",
-      onClick: (e) => { e.stopPropagation(); onRemove(); },
-      title: "remove",
-    }, "×"),
-  );
-}
-
-function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOptions, pendingIds, pendingHit, onPendingPick }) {
-  const setF = (k, v) => setInputs({ ...inputs, [k]: v });
-  const [urlDraft, setUrlDraft] = useState("");
-  const parseUrls = (raw) => {
-    const s = (raw || "").trim();
-    if (!s) return [];
-    // try JSON array first
-    if (s.startsWith("[")) {
-      try {
-        const arr = JSON.parse(s);
-        if (Array.isArray(arr)) return arr.map(x => String(x).trim()).filter(Boolean);
-      } catch (e) { /* fall through */ }
-    }
-    // otherwise split by newline / comma / whitespace, keep only http(s) tokens
-    return s.split(/[\s,]+/).map(x => x.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, "")).filter(x => /^https?:\/\//i.test(x));
-  };
-  const addUrl = () => {
-    const urls = parseUrls(urlDraft);
-    if (!urls.length) return;
-    setF("image_urls", [...((Array.isArray(inputs.image_urls) ? inputs.image_urls : [])), ...urls]);
-    setUrlDraft("");
-  };
-  const clearUrls = () => setF("image_urls", []);
-
-  // ----- V2: vision-prompt clipboard hand-off to Mira chat -----
-  const [visionReply, setVisionReply] = useState("");
-  const [copyMsg, setCopyMsg] = useState("");
-  const buildVisionPrompt = () => {
-    const urls = (Array.isArray(inputs.image_urls) ? inputs.image_urls : []);
-    if (!urls.length) return "";
-    const numbered = urls.map((u, i) => `${i + 1}. ${u}`).join("\n");
-    const ctx = [
-      inputs.caption_text && `caption_text: ${inputs.caption_text}`,
-      inputs.asr_text && `asr_text: ${inputs.asr_text}`,
-      inputs.ocr_text && `ocr_text: ${inputs.ocr_text}`,
-    ].filter(Boolean).join("\n");
-    return [
-      "You are a Trust & Safety policy reviewer for short-video content.",
-      "Look at the keyframes from the video below (in order) and write a single",
-      "concise visual_summary (≤120 words, plain prose, no headings, no bullets).",
-      "",
-      "Cover, when present: subject(s), action, setting, on-screen text, notable",
-      "objects, mood/tone, and any policy-relevant signals — weapons, fire, blood,",
-      "topic / category keywords describing the candidate case",
-      "Be specific and observational; do NOT make a policy judgement.",
-      "",
-      "Return ONLY the visual_summary text — no preamble, no quotes.",
-      "",
-      ctx ? `Additional context (already known):\n${ctx}\n` : "",
-      `Keyframes (${urls.length} images, in order):`,
-      numbered,
-    ].filter(x => x !== "").join("\n");
-  };
-  const copyVisionPrompt = async () => {
-    const p = buildVisionPrompt();
-    if (!p) { setCopyMsg("Add image URLs first"); setTimeout(() => setCopyMsg(""), 2000); return; }
-    try {
-      await navigator.clipboard.writeText(p);
-      setCopyMsg(`Copied (${(inputs.image_urls || []).length} keyframes). Paste into Mira chat →`);
-    } catch (e) {
-      // clipboard API may be blocked in sandbox; fall back to a textarea select+copy
-      const ta = document.createElement("textarea");
-      ta.value = p; document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); setCopyMsg("Copied via fallback. Paste into Mira chat →"); }
-      catch (_) { setCopyMsg("Copy failed — open the prompt panel below to copy manually."); }
-      document.body.removeChild(ta);
-    }
-    setTimeout(() => setCopyMsg(""), 4000);
-  };
-  const fillFromReply = () => {
-    const t = (visionReply || "").trim();
-    if (!t) return;
-    setF("visual_summary", t);
-    setVisionReply("");
-  };
-  // -------------------------------------------------------------
-
-  const removeUrl = (i) => {
-    const next = [...((Array.isArray(inputs.image_urls) ? inputs.image_urls : []))];
-    next.splice(i, 1);
-    setF("image_urls", next);
-  };
-
-  return h("div", { className: "panel" },
-    h("div", { className: "head" }, "Case input"),
-    h("div", { className: "body" },
-      h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.6.0"),
-
-      h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
-      h("input", {
-        type: "text", value: inputs.item_id, placeholder: "source_video_id, case_id, or rec...",
-        list: "pending-case-ids",
-        onChange: e => {
-          const v = e.target.value;
-          setF("item_id", v);
-          if (typeof onPendingPick === "function") onPendingPick(v);
-        },
-      }),
-      h("datalist", { id: "pending-case-ids" },
-        (pendingIds || []).map(id => h("option", { key: id, value: id })),
+// ---------- Carousel (V2.7.0) ----------
+function Carousel({ urls }) {
+  const [i, setI] = useState(0);
+  const [err, setErr] = useState({});
+  const list = Array.isArray(urls) ? urls : [];
+  if (!list.length) return null;
+  const cur = list[Math.min(i, list.length - 1)];
+  const onPrev = () => setI(x => Math.max(0, x - 1));
+  const onNext = () => setI(x => Math.min(list.length - 1, x + 1));
+  const onErr = () => setErr(e => Object.assign({}, e, { [i]: true }));
+  return h("div", { className: "carousel" },
+    h("div", { className: "car-frame" },
+      err[i]
+        ? h("div", { className: "car-fallback" }, "Image blocked by CDN. ",
+            h("a", { href: cur, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--primary)" } }, "Open in tab ↗"))
+        : h("img", {
+            src: cur,
+            alt: "keyframe " + (i + 1),
+            referrerPolicy: "no-referrer",
+            loading: i === 0 ? "eager" : "lazy",
+            onError: onErr,
+          }),
+      h("div", { className: "car-counter" }, (i + 1) + " / " + list.length),
+      list.length > 1 && h("div", { className: "car-controls" },
+        h("button", { className: "car-btn", onClick: onPrev, disabled: i === 0, "aria-label": "previous" }, "‹"),
+        h("button", { className: "car-btn", onClick: onNext, disabled: i === list.length - 1, "aria-label": "next" }, "›"),
       ),
-      pendingHit && h("div", { className: "hint", style: { color: "var(--primary)", fontWeight: 500 } },
-        `↳ Loaded from Pending Cases · source_video_id ${pendingHit}`),
-
-      h("label", null, "Visual summary"),
-      h("textarea", {
-        rows: 3, value: inputs.visual_summary,
-        onChange: e => setF("visual_summary", e.target.value),
-        placeholder: "What the frames show",
-      }),
-
-      h("label", null, "ASR (speech-to-text)"),
-      h("textarea", {
-        rows: 2, value: inputs.asr_text,
-        onChange: e => setF("asr_text", e.target.value),
-      }),
-
-      h("label", null, "OCR (on-screen text)"),
-      h("textarea", {
-        rows: 2, value: inputs.ocr_text,
-        onChange: e => setF("ocr_text", e.target.value),
-      }),
-
-      h("label", null, "Caption text"),
-      h("textarea", {
-        rows: 2, value: inputs.caption_text,
-        onChange: e => setF("caption_text", e.target.value),
-      }),
-
-      h("label", null, `Image URLs (display-only; ${(inputs.image_urls || []).length} loaded)`),
-      h("textarea", {
-        rows: 3, value: urlDraft,
-        placeholder: "Paste one URL per line, comma-separated, or a JSON array: [\"https://...\", \"https://...\"]",
-        onChange: e => setUrlDraft(e.target.value),
-        onKeyDown: e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addUrl(); } },
-      }),
-      h("div", { className: "row" },
-        h("button", { className: "secondary", onClick: addUrl, style: { flex: "0 0 auto" } }, "+ Add URLs"),
-        (inputs.image_urls && inputs.image_urls.length > 0) &&
-          h("button", { className: "secondary", onClick: clearUrls, style: { flex: "0 0 auto" } }, "Clear all"),
-      ),
-      (inputs.image_urls && inputs.image_urls.length > 0) &&
-        h("div", { className: "thumbs" },
-          (Array.isArray(inputs.image_urls) ? inputs.image_urls : []).map((u, i) =>
-            h(Thumb, { key: i, idx: i, url: u, onRemove: () => removeUrl(i) }),
-          ),
-        ),
-
-      (inputs.image_urls && inputs.image_urls.length > 0) && h("div", { className: "vision-row" },
-        h("div", { className: "row" },
-          h("button", {
-            className: "secondary",
-            onClick: copyVisionPrompt,
-            style: { flex: "0 0 auto" },
-            title: "Copy a ready-to-paste prompt; paste it into the Mira chat sidebar to get a visual_summary back",
-          }, "📋 Copy vision prompt"),
-          h("details", { style: { flex: "1 1 auto" } },
-            h("summary", null, "preview prompt"),
-            h("pre", { style: { fontSize: "11px", maxHeight: "160px", overflow: "auto", background: "#fafbfc", padding: "8px", border: "1px solid var(--line)", borderRadius: "4px", whiteSpace: "pre-wrap" } },
-              buildVisionPrompt()),
-          ),
-        ),
-        copyMsg && h("div", { className: "copy-msg" }, copyMsg),
-        h("label", { style: { marginTop: "8px" } }, "Paste Mira's reply here → fills Visual summary"),
-        h("textarea", {
-          rows: 3, value: visionReply,
-          placeholder: "Paste the visual_summary text Mira returned…",
-          onChange: e => setVisionReply(e.target.value),
-        }),
-        h("div", { className: "row" },
-          h("button", {
-            className: "secondary",
-            onClick: fillFromReply,
-            disabled: !(visionReply || "").trim(),
-            style: { flex: "0 0 auto" },
-          }, "↳ Fill Visual summary"),
-        ),
-      ),
-
-      h("div", { className: "divider" }),
-
-      h("div", { className: "row" },
-        h("div", null,
-          h("label", null, "Issue"),
-          h("select", {
-            value: inputs.issue || "",
-            onChange: e => setF("issue", e.target.value),
-          },
-            h("option", { value: "" }, "(any)"),
-            (facets.issues || []).map(x => h("option", { key: x, value: x }, x)),
-          ),
-        ),
-        h("div", null,
-          h("label", null, "Policy title"),
-          h("select", {
-            value: inputs.title || "",
-            onChange: e => setF("title", e.target.value),
-          },
-            h("option", { value: "" }, "(any)"),
-            titleOptions.map(x => h("option", { key: x, value: x }, x)),
-          ),
-        ),
-        h("div", { style: { flex: "0 0 80px" } },
-          h("label", null, "Top-k"),
-          h("select", {
-            value: inputs.k,
-            onChange: e => setF("k", parseInt(e.target.value, 10)),
-          },
-            [3, 5, 8, 10].map(k => h("option", { key: k, value: k }, k)),
-          ),
-        ),
-      ),
-
-      h("div", { className: "divider" }),
-
-      h("button", { onClick: onRun, disabled: loading }, loading ? "Running…" : "Run review"),
     ),
-  );
-}
-
-function PrecedentRow({ r, onSelect, selected }) {
-  const d = r.raw;
-  return h("tr", { className: selected ? "sel" : "", onClick: onSelect, style: { cursor: "pointer" } },
-    h("td", { className: "mono" }, (d.case_id || d.record_id).slice(0, 14)),
-    h("td", null, h(Tag, { kind: d.decision === "FLAG" ? "flag" : "pass" }, d.decision || "—")),
-    h("td", null, d.rule_applied_name
-      ? h(Tag, { kind: "linked" }, d.rule_applied_name.length > 32 ? d.rule_applied_name.slice(0, 32) + "…" : d.rule_applied_name)
-      : h(Tag, { kind: "unlinked" }, "unlinked"),
+    list.length > 1 && h("div", { className: "car-dots" },
+      list.map((_, j) => h("button", {
+        key: j,
+        className: "car-dot " + (j === i ? "active" : ""),
+        onClick: () => setI(j),
+        "aria-label": "frame " + (j + 1),
+      })),
     ),
-    h("td", null, d.status || "—"),
-    h("td", null, h(Tag, { kind: "sim" }, r.sim.toFixed(2))),
-    h("td", { style: { maxWidth: 260, fontSize: 11, color: "#4b5563" } },
-      ((d.visual_summary || d.asr_text || d.rationale) || "").slice(0, 160) + "…"),
+    h("a", { className: "car-open", href: cur, target: "_blank", rel: "noopener noreferrer" },
+      "Open frame " + (i + 1) + " in new tab ↗"),
   );
 }
 
+// ---------- Section (collapsible) ----------
+function Section({ title, defaultOpen, badge, children }) {
+  const [open, setOpen] = useState(defaultOpen !== false);
+  return h("div", { className: "section " + (open ? "open" : "collapsed") },
+    h("div", { className: "sec-head", onClick: () => setOpen(o => !o) },
+      h("span", null, title, badge != null && " ", badge != null && h("span", { className: "tag sim", style: { marginLeft: 4 } }, badge)),
+      h("span", { className: "chev" }, "▶"),
+    ),
+    h("div", { className: "sec-body" }, children),
+  );
+}
+
+// ---------- Banners / Draft decision (compact) ----------
 function ConsistencyBanner({ precedents }) {
   if (!precedents.length) {
-    return h("div", { className: "banner no-match" }, "No matching precedent in current corpus. Treat as candidate grey case.");
+    return h("div", { className: "banner no-match" }, "No matching precedent. Treat as candidate grey case.");
   }
   const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
   const passes = precedents.filter(p => p.raw.decision === "PASS").length;
   const total = flags + passes;
-  if (total === 0) {
-    return h("div", { className: "banner no-match" }, "Precedents found but no decisions recorded.");
-  }
+  if (total === 0) return h("div", { className: "banner no-match" }, "Precedents found but no decisions recorded.");
   if (flags === 0 || passes === 0) {
     return h("div", { className: "banner aligned" },
-      `✓ Aligned — ${total} precedent${total > 1 ? "s" : ""} all ${flags > 0 ? "FLAG" : "PASS"}`);
+      "✓ Aligned — " + total + " precedent" + (total > 1 ? "s" : "") + " all " + (flags > 0 ? "FLAG" : "PASS"));
   }
   return h("div", { className: "banner mixed" },
-    `⚠ Mixed precedent — ${flags} FLAG / ${passes} PASS in top-${precedents.length}. Candidate grey case — review distinguishing factors.`);
+    "⚠ Mixed — " + flags + " FLAG / " + passes + " PASS in top-" + precedents.length + ". Grey case.");
 }
 
 function DraftDecision({ precedents, topRule }) {
   if (!precedents.length) {
     return h("div", { className: "decision-box" },
-      h("h4", { style: { margin: "0 0 8px" } }, "Draft decision"),
-      h("div", { className: "d-row" }, h("b", null, "decision:"), h("span", { className: "muted" }, "no precedent — requires policy-team authoring")),
-      h("div", { className: "d-row" }, h("b", null, "case_type:"), h(Tag, { kind: "grey" }, "grey (novel)")),
-      h("div", { className: "d-row" }, h("b", null, "next step:"), "Draft a new AI Rule Book entry OR flag policy-gap item via workflow node U3."),
+      h("h4", null, "Draft decision"),
+      h("div", { className: "d-row" }, h("b", null, "decision"), h("span", { className: "muted" }, "no precedent — author new rule")),
+      h("div", { className: "d-row" }, h("b", null, "case_type"), h(Tag, { kind: "grey" }, "grey (novel)")),
     );
   }
   const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
@@ -1150,41 +1178,55 @@ function DraftDecision({ precedents, topRule }) {
   const decision = flags > passes ? "FLAG" : (passes > flags ? "PASS" : "—");
   const caseType = mixed ? "grey" : "routine";
   const topSim = precedents[0].sim;
-  const confidence = topSim > 0.7 && !mixed ? "high" :
-                     topSim > 0.4 || mixed ? "medium" : "low";
-
+  const confidence = topSim > 0.7 && !mixed ? "high" : topSim > 0.4 || mixed ? "medium" : "low";
   return h("div", { className: "decision-box" },
-    h("h4", { style: { margin: "0 0 8px" } }, "Draft decision"),
-    h("div", { className: "d-row" },
-      h("b", null, "decision:"),
+    h("h4", null, "Draft decision"),
+    h("div", { className: "d-row" }, h("b", null, "decision"),
       h(Tag, { kind: decision === "FLAG" ? "flag" : "pass" }, decision),
-      h("span", { className: "muted", style: { fontSize: 11 } },
-        `(dominant in ${Math.max(flags, passes)}/${total} precedents)`),
+      h("span", { className: "muted mono" }, "(" + Math.max(flags, passes) + "/" + total + ")")),
+    h("div", { className: "d-row" }, h("b", null, "type"),
+      h(Tag, { kind: caseType === "grey" ? "grey" : "routine" }, caseType)),
+    h("div", { className: "d-row" }, h("b", null, "rule"),
+      topRule ? h("span", { className: "mono" }, topRule.rule_name) : h("span", { className: "muted" }, "no rule")),
+    h("div", { className: "d-row" }, h("b", null, "conf."),
+      h("span", null, confidence, " ", h("span", { className: "muted mono" }, "(sim " + topSim.toFixed(2) + ")"))),
+  );
+}
+
+// ---------- Precedent (accordion item) ----------
+function PrecedentAccordion({ r, rank, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const d = r.raw;
+  const decKind = d.decision === "FLAG" ? "flag" : d.decision === "PASS" ? "pass" : "sim";
+  return h("div", { className: "prec-item " + (open ? "open" : "") },
+    h("div", { className: "prec-head", onClick: () => setOpen(o => !o) },
+      h("span", { className: "muted mono", style: { width: 18 } }, "#" + rank),
+      h(Tag, { kind: decKind }, d.decision || "—"),
+      h("span", { className: "prec-id" }, (d.case_id || d.record_id || "").slice(0, 18)),
+      h(Tag, { kind: "sim" }, "sim " + r.sim.toFixed(2)),
+      h("span", { className: "muted mono" }, open ? "▾" : "▸"),
     ),
-    h("div", { className: "d-row" },
-      h("b", null, "case_type:"),
-      h(Tag, { kind: caseType === "grey" ? "grey" : "routine" }, caseType),
-    ),
-    h("div", { className: "d-row" },
-      h("b", null, "suggested rule:"),
-      topRule
-        ? h("span", { className: "mono" }, topRule.rule_name)
-        : h("span", { className: "muted" }, "no rule matched"),
-    ),
-    h("div", { className: "d-row" },
-      h("b", null, "confidence:"),
-      h("span", null, confidence, " ",
-        h("span", { className: "muted", style: { fontSize: 11 } }, `(top-sim ${topSim.toFixed(2)})`)),
-    ),
-    h("div", { className: "d-row" },
-      h("b", null, "next step:"),
-      caseType === "grey"
-        ? "Populate IRAC fields (fact_summary, issue, rule_invoked, rule_signals_present, analysis, distinguishing_factors, disposition)."
-        : "Confirm decision + rationale one-liner; promote to Peer Reviewed after second-analyst pass.",
+    h("div", { className: "prec-body" },
+      h("dl", { className: "dl-stack" },
+        d.policy_title && h(React.Fragment, null, h("dt", null, "policy"), h("dd", null, d.policy_title)),
+        d.rule_applied_name && h(React.Fragment, null, h("dt", null, "rule"), h("dd", null, d.rule_applied_name)),
+        d.status && h(React.Fragment, null, h("dt", null, "status"), h("dd", null, d.status)),
+        d.reference_weight && h(React.Fragment, null, h("dt", null, "weight"), h("dd", null, String(d.reference_weight))),
+        d.key_signals && d.key_signals.length > 0 && h(React.Fragment, null,
+          h("dt", null, "signals"),
+          h("dd", null, d.key_signals.slice(0, 8).map((s, i) => h(Tag, { key: i, kind: "sim" }, s)).reduce((a, b) => [a, " ", b])),
+        ),
+      ),
+      d.visual_summary && h("details", { open: true }, h("summary", null, "visual_summary"), h("pre", null, d.visual_summary)),
+      d.asr_text && h("details", null, h("summary", null, "asr_text"), h("pre", null, d.asr_text)),
+      d.ocr_text && h("details", null, h("summary", null, "ocr_text"), h("pre", null, d.ocr_text)),
+      d.caption_text && h("details", null, h("summary", null, "caption_text"), h("pre", null, d.caption_text)),
+      d.rationale && h("details", { open: true }, h("summary", null, "rationale"), h("pre", null, d.rationale)),
     ),
   );
 }
 
+// ---------- Rule card (compact) ----------
 function RuleCard({ rule }) {
   if (!rule) return null;
   return h("div", { className: "card" },
@@ -1192,92 +1234,62 @@ function RuleCard({ rule }) {
     h("div", { className: "kvp" },
       h(Tag, { kind: "linked" }, rule.issue || "—"),
       " · status: ", rule.status || "—"),
-    rule.plain_description && h("div", { style: { margin: "6px 0", fontSize: 12 } }, rule.plain_description),
-    rule.plain_rule_text && h("details", null,
-      h("summary", null, "plain_rule_text"),
-      h("pre", null, rule.plain_rule_text),
-    ),
-    rule.example_cases && h("details", null,
-      h("summary", null, "example_cases"),
-      h("pre", null, rule.example_cases),
-    ),
+    rule.rule_description && h("div", { className: "kvp" }, rule.rule_description),
+    rule.rule_text && h("details", null, h("summary", null, "rule_text"), h("pre", null, rule.rule_text)),
+    rule.examples && h("details", null, h("summary", null, "examples"), h("pre", null, rule.examples)),
   );
 }
 
-function PrecedentDetail({ p }) {
-  if (!p) return null;
-  const d = p.raw;
-  return h("div", { className: "card", style: { background: "var(--surface-soft)" } },
-    h("h4", null, `Precedent detail · ${d.case_id || d.record_id}`),
-    h("div", { className: "kvp" },
-      h(Tag, { kind: d.decision === "FLAG" ? "flag" : "pass" }, d.decision || "—"),
-      " · ", d.issue,
-      d.policy_title && ` · ${d.policy_title}`,
-      d.status && ` · ${d.status}`,
-      d.reference_weight && ` · weight: ${d.reference_weight}`),
-    d.rule_applied_name && h("div", { className: "kvp" }, "rule_applied: ", h("b", null, d.rule_applied_name)),
-    d.key_signals && d.key_signals.length > 0 && h("div", { className: "kvp" },
-      "signals: ", d.key_signals.map((s, i) => h(Tag, { key: i, kind: "sim" }, s)).reduce((a, b) => [a, " ", b])),
-    d.visual_summary && h("details", { open: true }, h("summary", null, "visual_summary"), h("pre", null, d.visual_summary)),
-    d.asr_text && h("details", null, h("summary", null, "asr_text"), h("pre", null, d.asr_text)),
-    d.ocr_text && h("details", null, h("summary", null, "ocr_text"), h("pre", null, d.ocr_text)),
-    d.caption_text && h("details", null, h("summary", null, "caption_text"), h("pre", null, d.caption_text)),
-    d.rationale && h("details", { open: true }, h("summary", null, "rationale"), h("pre", null, d.rationale)),
-  );
-}
-
-
+// ---------- Reasoned verdict (compact) ----------
 function ReasonedVerdict({ v }) {
   if (!v) return null;
   const dec = (v.draft_decision || "").toUpperCase();
   const decKind = dec === "FLAG" ? "flag" : dec === "PASS" ? "pass" : "sim";
   const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
-  return h("div", { className: "panel", style: { marginTop: 16, borderColor: "var(--primary)", borderWidth: "1px" } },
-    h("div", { className: "head", style: { background: "#1e1b4b" } },
-      "🧠 Reasoned verdict (LLM)"),
-    h("div", { className: "body" },
-      h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-        h(Tag, { kind: decKind }, "decision: ", dec || "?"),
+  return h("div", { className: "section open", style: { borderColor: "var(--primary)" } },
+    h("div", { className: "sec-head", style: { background: "var(--surface-card)" } },
+      h("span", null, "🧠 Reasoned verdict"),
+      h("span", { className: "chev" }, ""),
+    ),
+    h("div", { className: "sec-body" },
+      h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 } },
+        h(Tag, { kind: decKind }, dec || "?"),
         v.policy_title && h(Tag, { kind: "sim" }, v.policy_title),
-        v.severity && h(Tag, { kind: sevKind }, "severity: ", v.severity),
+        v.severity && h(Tag, { kind: sevKind }, "sev: " + v.severity),
         (typeof v.confidence === "number") && h(Tag, { kind: v.confidence >= 7 ? "pass" : v.confidence <= 4 ? "flag" : "sim" },
-          "confidence: ", v.confidence, "/10"),
+          "conf " + v.confidence + "/10"),
         v.grey && h(Tag, { kind: "flag" }, "GREY"),
         v.policy_gap_flag && h(Tag, { kind: "flag" }, "POLICY GAP"),
       ),
-      v.applied_rule && h("div", { className: "kvp", style: { marginTop: 10 } },
-        "applied_rule: ", h("b", null, v.applied_rule)),
-      v.rule_rationale && h("div", { className: "muted", style: { fontSize: 12, marginTop: 4 } }, v.rule_rationale),
-
-      Array.isArray(v.precedent_analysis) && v.precedent_analysis.length > 0 && h(React.Fragment, null,
-        h("h3", { style: { marginTop: 16, fontSize: 13 } }, "Precedent analysis"),
-        h("table", null,
-          h("thead", null, h("tr", null,
-            h("th", null, "Case"),
-            h("th", null, "Applic."),
-            h("th", null, "Align"),
-            h("th", null, "Shared"),
-            h("th", null, "Conflicting"),
-          )),
-          h("tbody", null, v.precedent_analysis.map((pa, i) => {
-            const ap = (pa.applicability || "").toUpperCase();
-            const apKind = ap === "APPLICABLE" ? "pass" : ap === "PARTIAL" ? "sim" : "flag";
-            return h("tr", { key: i },
-              h("td", null, pa.case_id || "?"),
-              h("td", null, h(Tag, { kind: apKind }, ap || "?")),
-              h("td", null, pa.decision_alignment || "—"),
-              h("td", null, Array.isArray(pa.shared_signals) ? pa.shared_signals.join(", ") : (pa.shared_signals || "—")),
-              h("td", null, Array.isArray(pa.conflicting_signals) ? pa.conflicting_signals.join(", ") : (pa.conflicting_signals || "—")),
-            );
-          })),
-        ),
+      v.applied_rule && h("dl", { className: "dl-stack" },
+        h("dt", null, "applied rule"), h("dd", null, v.applied_rule),
+        v.rule_rationale && h("dt", null, "rationale"),
+        v.rule_rationale && h("dd", null, v.rule_rationale),
       ),
 
-      v.reasoning && h("div", { style: { marginTop: 14 } },
+      Array.isArray(v.precedent_analysis) && v.precedent_analysis.length > 0 && h("div", { style: { marginTop: 10 } },
+        h("div", { className: "muted mono", style: { marginBottom: 4 } }, "PRECEDENT ANALYSIS"),
+        v.precedent_analysis.map((pa, i) => {
+          const ap = (pa.applicability || "").toUpperCase();
+          const apKind = ap === "APPLICABLE" ? "pass" : ap === "PARTIAL" ? "sim" : "flag";
+          return h("div", { key: i, className: "card", style: { padding: 8, marginBottom: 6 } },
+            h("div", { className: "kvp" },
+              h(Tag, { kind: apKind }, ap || "?"), " ",
+              h("span", { className: "mono" }, pa.case_id || "?"), " · ",
+              h("span", null, pa.decision_alignment || "—")),
+            (Array.isArray(pa.shared_signals) && pa.shared_signals.length > 0) && h("div", { className: "kvp" },
+              h("span", { className: "muted" }, "shared: "), pa.shared_signals.join(", ")),
+            (Array.isArray(pa.conflicting_signals) && pa.conflicting_signals.length > 0) && h("div", { className: "kvp" },
+              h("span", { className: "muted" }, "conflict: "), pa.conflicting_signals.join(", ")),
+          );
+        }),
+      ),
+
+      v.reasoning && h("div", { style: { marginTop: 10 } },
         v.reasoning.visual_analysis && h("details", { open: true },
-          h("summary", null, "[VISUAL ANALYSIS]"), h("pre", null, v.reasoning.visual_analysis)),
+          h("summary", null, "[VISUAL]"), h("pre", null, v.reasoning.visual_analysis)),
         v.reasoning.text_analysis && h("details", null,
-          h("summary", null, "[TEXT ANALYSIS]"), h("pre", null, v.reasoning.text_analysis)),
+          h("summary", null, "[TEXT]"), h("pre", null, v.reasoning.text_analysis)),
         v.reasoning.first_pass && h("details", { open: true },
           h("summary", null, "[FIRST PASS]"), h("pre", null, v.reasoning.first_pass)),
         v.reasoning.second_pass && h("details", { open: true },
@@ -1286,26 +1298,24 @@ function ReasonedVerdict({ v }) {
           h("summary", null, "[VERDICT]"), h("pre", null, v.reasoning.verdict)),
       ),
 
-      Array.isArray(v.watch_outs) && v.watch_outs.length > 0 && h("div", { style: { marginTop: 12 } },
-        h("div", { className: "kvp" }, "Watch-outs:"),
-        h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 } },
-          v.watch_outs.map((w, i) => h(Tag, { key: i, kind: "sim" }, w))),
-      ),
+      Array.isArray(v.watch_outs) && v.watch_outs.length > 0 && h("div", { style: { marginTop: 8 } },
+        h("div", { className: "muted mono" }, "WATCH-OUTS"),
+        h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 } },
+          v.watch_outs.map((w, i) => h(Tag, { key: i, kind: "sim" }, w)))),
 
-      v.next_step && h("div", { className: "kvp", style: { marginTop: 12 } },
-        "next_step: ", h("b", null, v.next_step)),
-
-      Array.isArray(v.exemptions_applied) && v.exemptions_applied.length > 0 && h("div", { className: "kvp", style: { marginTop: 6 } },
-        "exemptions: ", v.exemptions_applied.join(", ")),
+      v.next_step && h("div", { className: "kvp", style: { marginTop: 8 } },
+        h("span", { className: "muted" }, "next: "), h("b", null, v.next_step)),
     ),
   );
 }
 
+// ---------- App shell ----------
 function App() {
-  // Lightweight wrapper: loads corpus, then mounts MainApp with stable hook list.
   const [corpus, setCorpus] = useState(null);
   const [corpusError, setCorpusError] = useState("");
   const [corpusLoading, setCorpusLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => { setCorpus(null); setCorpusError(""); setCorpusLoading(true); setReloadKey(k => k + 1); }, []);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1317,17 +1327,35 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
-  if (corpusLoading) return h("div", { style: { padding: 24, fontSize: 13 } }, "Loading corpus from Base…");
-  if (corpusError) return h("div", { style: { padding: 24, fontSize: 13, color: "#d1242f" } },
-    "Failed to load corpus: ", corpusError, h("br"), h("br"),
-    h("span", { className: "muted" }, "Make sure this plugin is opened from inside a Base whose tables match the configured names."));
+  }, [reloadKey]);
+  if (corpusLoading) {
+    return h("div", { className: "shell" },
+      h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
+      h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V2.7.0")),
+    );
+  }
+  if (corpusError) {
+    return h("div", { className: "shell" },
+      h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
+      h("div", { className: "shell-body" },
+        h("div", { className: "banner no-match" }, "Failed to load corpus: ", corpusError),
+        h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
+        h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
+      ),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V2.7.0")),
+    );
+  }
   if (!corpus) return null;
-  return h(MainApp, { corpus });
+  return h(MainApp, { corpus, onReloadCorpus: reload });
 }
 
-function MainApp({ corpus }) {
+function MainApp({ corpus, onReloadCorpus }) {
+  // ---- Navigation state ----
+  const [view, setView] = useState("queue"); // 'queue' | 'case' | 'diagnostics'
+  const [menuOpen, setMenuOpen] = useState(false);
 
+  // ---- Case form state (inputs) ----
   const [inputs, setInputs] = useState({
     item_id: "",
     visual_summary: "",
@@ -1340,23 +1368,27 @@ function MainApp({ corpus }) {
     k: 5,
   });
   const [pendingHit, setPendingHit] = useState("");
+
+  // ---- Review result + verdict state ----
   const [result, setResult] = useState(null);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [payloadJson, setPayloadJson] = useState("");
   const [reasoningCopied, setReasoningCopied] = useState(false);
   const [reasonedRaw, setReasonedRaw] = useState("");
   const [reasonedVerdict, setReasonedVerdict] = useState(null);
   const [reasonedError, setReasonedError] = useState("");
+  const [showHandoff, setShowHandoff] = useState(false);
 
-  // Build index once
+  // ---- Verbose logging toggle (session-only) ----
+  const [verbose, setVerbose] = useState(false);
+
+  // ---- BM25 index ----
   const index = useMemo(() => buildIndex(corpus.cases), [corpus]);
   const pendingMap = useMemo(() => {
     const m = new Map();
     (corpus.pending || []).forEach(p => { if (p.source_video_id) m.set(p.source_video_id, p); });
     return m;
   }, [corpus]);
-  const pendingIds = useMemo(() => Array.from(pendingMap.keys()).sort(), [pendingMap]);
   const stats = { cases: corpus.cases.length, rules: corpus.rules.length, pending: pendingMap.size };
   const facets = corpus.facets || { issues: [], titles: [], titlesByIssue: {} };
   const titleOptions = useMemo(() => {
@@ -1368,55 +1400,41 @@ function MainApp({ corpus }) {
     return all;
   }, [inputs.issue, facets]);
 
-  // Auto-prefill from Pending Cases when case_id matches
-  const onPendingPick = useCallback((rawId) => {
-    const id = (rawId || "").trim();
-    if (!id) { setPendingHit(""); return; }
-    const p = pendingMap.get(id);
-    if (!p) { setPendingHit(""); return; }
-    setPendingHit(id);
-    setInputs(prev => ({
-      ...prev,
-      // item_id stays as the source_video_id the user typed
-      case_id_ref: p.case_id || "",
-      visual_summary: p.visual_summary || prev.visual_summary,
-      asr_text: p.asr_text || prev.asr_text,
-      ocr_text: p.ocr_text || prev.ocr_text,
-      caption_text: p.caption_text || prev.caption_text,
-      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : prev.image_urls,
-      issue: p.issue || prev.issue,
-      title: p.policy_title || prev.title,
-    }));
-  }, [pendingMap]);
+  // ---- Pre-fill from a Pending Cases row ----
+  const applyPending = useCallback((p) => {
+    if (!p) return;
+    setInputs({
+      item_id: p.source_video_id || "",
+      visual_summary: p.visual_summary || "",
+      asr_text: p.asr_text || "",
+      ocr_text: p.ocr_text || "",
+      caption_text: p.caption_text || "",
+      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : [],
+      issue: p.issue || "",
+      title: p.policy_title || "",
+      k: 5,
+    });
+    setPendingHit(p.source_video_id || "");
+    setResult(null);
+    setReasonedRaw(""); setReasonedVerdict(null); setReasonedError("");
+    setPayloadJson(""); setReasoningCopied(false);
+    setShowHandoff(false);
+    setView("case");
+  }, []);
 
-  // Item-id lookup -> pre-fill
-  const onLookup = useCallback(() => {
-    const q = inputs.item_id.trim();
-    if (!q) return;
-    const c = corpus.cases.find(x => x.case_id === q || x.record_id === q || x.source_video_id === q);
-    if (c) {
-      setInputs(s => ({
-        ...s,
-        visual_summary: c.visual_summary || s.visual_summary,
-        asr_text: c.asr_text || s.asr_text,
-        ocr_text: c.ocr_text || s.ocr_text,
-        caption_text: c.caption_text || s.caption_text,
-      }));
-    } else {
-      alert("Item ID not found in current corpus (case_id / record_id / source_video_id)");
-    }
-  }, [inputs.item_id, corpus]);
+  const onPickQueueItem = useCallback((sourceVideoId) => {
+    const p = pendingMap.get(sourceVideoId);
+    if (p) applyPending(p);
+  }, [pendingMap, applyPending]);
 
   const onRun = useCallback(() => {
     setLoading(true);
-    // Synthesize query text
     const queryText = [
       inputs.visual_summary, inputs.asr_text, inputs.ocr_text, inputs.caption_text,
     ].filter(Boolean).join(" ");
     const qtok = tokenize(queryText);
     setTimeout(() => {
       let ranked = score(index, qtok, { issue: inputs.issue || null, title: inputs.title || null });
-      // Exclude self if item_id matches
       if (inputs.item_id) {
         ranked = ranked.filter(r => r.raw.case_id !== inputs.item_id && r.raw.record_id !== inputs.item_id);
       }
@@ -1425,11 +1443,9 @@ function MainApp({ corpus }) {
         corpus.rules.filter(r =>
           (!inputs.issue || r.issue === inputs.issue) &&
           (!inputs.title || r.policy_title === inputs.title)
-        ),
-        qtok,
+        ), qtok,
       );
       setResult({ precedents: ranked, topRule: rulesRanked[0] && rulesRanked[0].score > 0 ? rulesRanked[0] : null, query: queryText });
-      setSelectedIdx(0);
       setLoading(false);
     }, 20);
   }, [inputs, index, corpus]);
@@ -1437,134 +1453,343 @@ function MainApp({ corpus }) {
   const onBuildPayload = useCallback(() => {
     if (!result) return;
     const payload = buildPayload({
-      inputs,
-      precedents: result.precedents,
-      topRule: result.topRule,
-      issue: inputs.issue,
+      inputs, precedents: result.precedents, topRule: result.topRule, issue: inputs.issue,
     });
     const txt = JSON.stringify(payload, null, 2);
     setPayloadJson(txt);
     setReasoningCopied(false);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(
-        () => setReasoningCopied(true),
-        () => setReasoningCopied(false),
-      );
+      navigator.clipboard.writeText(txt).then(() => setReasoningCopied(true), () => setReasoningCopied(false));
     }
   }, [result, inputs]);
 
   const onParseReply = useCallback(() => {
     setReasonedError("");
     const parsed = tryParseReasonedJson(reasonedRaw);
-    if (!parsed) {
-      setReasonedError("Could not parse JSON. Make sure the reply contains a single {…} object.");
-      setReasonedVerdict(null);
-      return;
-    }
+    if (!parsed) { setReasonedError("Could not parse JSON. Make sure the reply contains a single {…} object."); setReasonedVerdict(null); return; }
     setReasonedVerdict(parsed);
   }, [reasonedRaw]);
 
-  return h("div", { className: "root" },
-    h("div", null,
-      h(InputPanel, { inputs, setInputs, onRun, loading, stats, facets, titleOptions, pendingIds, pendingHit, onPendingPick }),
-      h("div", { style: { marginTop: 8, fontSize: 11, color: "var(--muted)" } },
-        inputs.item_id
-          ? h("button", { className: "secondary", onClick: onLookup, style: { fontSize: 11, padding: "4px 8px" } },
-              "Pre-fill from corpus")
-          : null,
+  // ---- Header ----
+  const headerTitle = view === "queue" ? "Pending queue"
+                    : view === "case" ? (inputs.item_id || "New case")
+                    : "Diagnostics";
+  const showBack = view !== "queue";
+  const onBack = () => {
+    if (view === "case") setView("queue");
+    else if (view === "diagnostics") setView("queue");
+  };
+
+  const headerEl = h("div", { className: "shell-header" },
+    showBack && h("button", { className: "nav-btn", onClick: onBack, "aria-label": "back", title: "Back" }, "‹"),
+    h("div", { className: "title" }, headerTitle),
+    h("div", { className: "menu-wrap" },
+      h("button", { className: "nav-btn", onClick: () => setMenuOpen(o => !o), "aria-label": "menu" }, "⋯"),
+      menuOpen && h("div", { className: "menu-pop", onMouseLeave: () => setMenuOpen(false) },
+        h("button", { onClick: () => { setMenuOpen(false); setView("queue"); } }, "Queue"),
+        h("button", { onClick: () => { setMenuOpen(false); setView("diagnostics"); } }, "Diagnostics"),
+        h("button", { onClick: () => { setMenuOpen(false); onReloadCorpus(); } }, "Refresh corpus"),
+      ),
+    ),
+  );
+
+  const footerEl = h("div", { className: "shell-footer" },
+    h("span", null,
+      "cases ", stats.cases, " · rules ", stats.rules,
+      stats.pending != null ? " · pending " + stats.pending : ""),
+    h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
+      "build V2.7.0"),
+  );
+
+  // ---- Views ----
+  if (view === "queue") {
+    return h("div", { className: "shell" },
+      headerEl,
+      h("div", { className: "shell-body no-actionbar" },
+        h(QueueView, { pending: corpus.pending || [], onPick: onPickQueueItem, onNewCase: () => { applyPending({ source_video_id: "" }); } }),
+      ),
+      footerEl,
+    );
+  }
+  if (view === "diagnostics") {
+    return h("div", { className: "shell" },
+      headerEl,
+      h("div", { className: "shell-body no-actionbar" },
+        h(DiagnosticsView, {
+          stats, corpus, verbose, setVerbose,
+          onReloadCorpus,
+        }),
+      ),
+      footerEl,
+    );
+  }
+  // Case view
+  return h("div", { className: "shell" },
+    headerEl,
+    h("div", { className: "shell-body" },
+      h(CaseView, {
+        inputs, setInputs, pendingHit,
+        result, loading, onRun,
+        facets, titleOptions,
+        onBuildPayload, payloadJson, reasoningCopied,
+        reasonedRaw, setReasonedRaw, reasonedVerdict, reasonedError, onParseReply,
+        showHandoff, setShowHandoff,
+      }),
+    ),
+    h(CaseActionBar, { result, loading, onRun, hasInputs: !!(inputs.visual_summary || inputs.asr_text || inputs.ocr_text || inputs.caption_text) }),
+    footerEl,
+  );
+}
+
+// ---------- QueueView ----------
+function QueueView({ pending, onPick, onNewCase }) {
+  const [q, setQ] = useState("");
+  const list = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const arr = (pending || []).slice();
+    if (!s) return arr;
+    return arr.filter(p =>
+      (p.source_video_id || "").toLowerCase().includes(s)
+      || (p.policy_title || "").toLowerCase().includes(s)
+      || (p.issue || "").toLowerCase().includes(s)
+    );
+  }, [pending, q]);
+  return h(React.Fragment, null,
+    h("div", { className: "row tight", style: { marginBottom: 10 } },
+      h("input", {
+        type: "text", value: q,
+        placeholder: "Filter by ID, issue, or policy…",
+        onChange: e => setQ(e.target.value),
+      }),
+      h("button", { className: "secondary", style: { flex: "0 0 auto" }, onClick: onNewCase, title: "Start a blank case" }, "+ New"),
+    ),
+    list.length === 0
+      ? h("div", { className: "muted", style: { padding: "24px 8px", textAlign: "center" } },
+          (pending && pending.length) ? "No matches." : "No pending cases.")
+      : h("div", { className: "queue-list" },
+          list.map(p => h(QueueCard, { key: p.record_id || p.source_video_id, p, onPick: () => onPick(p.source_video_id) })),
+        ),
+  );
+}
+
+function QueueCard({ p, onPick }) {
+  const thumb = (p.image_urls && p.image_urls[0]) || "";
+  const [err, setErr] = useState(false);
+  return h("div", { className: "queue-card", onClick: onPick, role: "button", tabIndex: 0,
+      onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } } },
+    h("div", { className: "qc-thumb" },
+      thumb && !err
+        ? h("img", { src: thumb, alt: "", referrerPolicy: "no-referrer", loading: "lazy", onError: () => setErr(true) })
+        : h("span", null, (p.image_urls && p.image_urls.length) ? "🖼" : "—"),
+    ),
+    h("div", { className: "qc-meta" },
+      h("div", { className: "qc-id" }, p.source_video_id || "(no id)"),
+      p.policy_title && h("div", { className: "qc-title" }, p.policy_title),
+      h("div", { className: "qc-row" },
+        p.issue && h(Tag, { kind: "linked" }, p.issue),
+        h(Tag, { kind: "pending" }, "pending"),
+        p.image_urls && p.image_urls.length > 0 && h("span", { className: "qc-age" }, p.image_urls.length + " img"),
+      ),
+    ),
+  );
+}
+
+// ---------- CaseView ----------
+function CaseView({
+  inputs, setInputs, pendingHit,
+  result, loading, onRun,
+  facets, titleOptions,
+  onBuildPayload, payloadJson, reasoningCopied,
+  reasonedRaw, setReasonedRaw, reasonedVerdict, reasonedError, onParseReply,
+  showHandoff, setShowHandoff,
+}) {
+  const setF = (k, v) => setInputs(Object.assign({}, inputs, { [k]: v }));
+  const urls = Array.isArray(inputs.image_urls) ? inputs.image_urls : [];
+
+  return h(React.Fragment, null,
+    // Candidate inputs section
+    h(Section, { title: "Candidate", defaultOpen: true },
+      pendingHit && h("div", { className: "hint", style: { color: "var(--primary)", fontWeight: 500, marginBottom: 6 } },
+        "↳ Loaded from Pending · " + pendingHit),
+      h("label", null, "Source video ID"),
+      h("input", { type: "text", value: inputs.item_id, placeholder: "source_video_id…",
+        onChange: e => setF("item_id", e.target.value) }),
+      h("label", null, "Visual summary"),
+      h("textarea", { rows: 4, value: inputs.visual_summary, onChange: e => setF("visual_summary", e.target.value),
+        placeholder: "What the frames show" }),
+      h("label", null, "ASR (speech)"),
+      h("textarea", { rows: 2, value: inputs.asr_text, onChange: e => setF("asr_text", e.target.value) }),
+      h("label", null, "OCR (on-screen text)"),
+      h("textarea", { rows: 2, value: inputs.ocr_text, onChange: e => setF("ocr_text", e.target.value) }),
+      h("label", null, "Caption"),
+      h("textarea", { rows: 2, value: inputs.caption_text, onChange: e => setF("caption_text", e.target.value) }),
+      h("div", { className: "row tight", style: { marginTop: 8 } },
+        h("div", null,
+          h("label", null, "Issue"),
+          h("select", { value: inputs.issue || "", onChange: e => setF("issue", e.target.value) },
+            h("option", { value: "" }, "(any)"),
+            (facets.issues || []).map(x => h("option", { key: x, value: x }, x)),
+          ),
+        ),
+        h("div", null,
+          h("label", null, "Top-k"),
+          h("select", { value: inputs.k, onChange: e => setF("k", parseInt(e.target.value, 10)) },
+            [3, 5, 8, 10].map(k => h("option", { key: k, value: k }, k)),
+          ),
+        ),
+      ),
+      h("label", null, "Policy title"),
+      h("select", { value: inputs.title || "", onChange: e => setF("title", e.target.value) },
+        h("option", { value: "" }, "(any)"),
+        titleOptions.map(x => h("option", { key: x, value: x }, x)),
       ),
     ),
 
-    h("div", { className: "panel" },
-      h("div", { className: "head" }, "Review output"),
-      h("div", { className: "body" },
-        !result && h("div", { className: "muted" }, "Fill input on the left, click Run review."),
+    // Carousel section
+    urls.length > 0 && h(Section, { title: "Keyframes", defaultOpen: true, badge: urls.length },
+      h(Carousel, { urls }),
+    ),
 
-        result && h(React.Fragment, null,
-          h(ConsistencyBanner, { precedents: result.precedents }),
-
-          h(DraftDecision, { precedents: result.precedents, topRule: result.topRule }),
-
-          h("h3", { style: { marginTop: 20, fontSize: 13 } }, `Retrieved precedents (top-${result.precedents.length})`),
-          result.precedents.length === 0
-            ? h("div", { className: "muted", style: { fontStyle: "italic" } }, "No candidates scored > 0. Try broadening inputs.")
-            : h("table", null,
-                h("thead", null, h("tr", null,
-                  h("th", null, "ID"),
-                  h("th", null, "Dec."),
-                  h("th", null, "Rule"),
-                  h("th", null, "Status"),
-                  h("th", null, "Sim"),
-                  h("th", null, "Preview"),
-                )),
-                h("tbody", null,
-                  result.precedents.map((r, i) =>
-                    h(PrecedentRow, {
-                      key: r.record_id, r, selected: i === selectedIdx,
-                      onSelect: () => setSelectedIdx(i),
-                    }),
-                  ),
-                ),
-              ),
-
-          h("h3", { style: { marginTop: 20, fontSize: 13 } }, "Most-likely rule"),
-          result.topRule
-            ? h(RuleCard, { rule: result.topRule })
-            : h("div", { className: "muted", style: { fontStyle: "italic" } }, "No rule matched — may indicate a policy-gap item."),
-
-          result.precedents.length > 0 && h(React.Fragment, null,
-            h("h3", { style: { marginTop: 20, fontSize: 13 } }, "Precedent detail"),
-            h(PrecedentDetail, { p: result.precedents[selectedIdx] }),
-          ),
-
-          h("div", { className: "meta-row", style: { marginTop: 20 } },
-            h("details", null,
-              h("summary", null, "debug: query tokens"),
-              h("pre", null, tokenize(result.query).join(" ")),
-            ),
-          ),
-
-          // ---------- V2.3: payload hand-off to Mira reviewer skill ----------
-          h("div", { style: { marginTop: 24, padding: 14, border: "1px dashed #7c3aed", borderRadius: 8, background: "#0f0a23" } },
-            h("div", { style: { fontSize: 13, fontWeight: 600, color: "#c4b5fd", marginBottom: 8 } },
-              "Step 2 — Send payload to Mira reviewer skill"),
-            h("div", { className: "muted", style: { fontSize: 12, marginBottom: 10 } },
-              "Build a compact JSON payload (candidate + precedents + top rule) and copy it into Mira chat. The reviewer skill applies the methodology server-side and returns a structured verdict — paste the JSON reply below."),
-            h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 } },
-              h("button", { onClick: onBuildPayload },
-                reasoningCopied ? "✓ Payload copied" : "Build & copy payload"),
-              payloadJson && h("button", { className: "secondary",
-                onClick: () => { navigator.clipboard && navigator.clipboard.writeText(payloadJson).then(() => setReasoningCopied(true)); } },
-                "Copy again"),
-              payloadJson && h("span", { className: "muted", style: { fontSize: 11, alignSelf: "center" } },
-                "(", payloadJson.length.toLocaleString(), " chars · payload ", PAYLOAD_VERSION, ")"),
-            ),
-            payloadJson && h("details", { style: { marginBottom: 10 } },
-              h("summary", { style: { fontSize: 12, color: "var(--muted)" } }, "Preview payload (manual copy fallback)"),
-              h("textarea", {
-                readOnly: true, value: payloadJson,
-                style: { width: "100%", minHeight: 160, fontFamily: "ui-monospace, monospace", fontSize: 11, marginTop: 6 },
-                onFocus: e => e.target.select(),
-              }),
-            ),
-            h("div", { style: { fontSize: 12, color: "var(--muted)", marginBottom: 4 } },
-              "Paste Mira's JSON reply:"),
-            h("textarea", {
-              value: reasonedRaw,
-              onChange: e => setReasonedRaw(e.target.value),
-              placeholder: '{"draft_decision": "...", "policy_title": "...", "confidence": 7, ...}',
-              style: { width: "100%", minHeight: 120, fontFamily: "ui-monospace, monospace", fontSize: 11 },
-            }),
-            h("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center" } },
-              h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim() }, "Render reasoned verdict"),
-              reasonedRaw && h("button", { className: "secondary", onClick: () => { setReasonedRaw(""); setReasonedVerdict(null); setReasonedError(""); } }, "Clear"),
-              reasonedError && h("span", { style: { color: "#f87171", fontSize: 12 } }, reasonedError),
-            ),
-          ),
-
-          reasonedVerdict && h(ReasonedVerdict, { v: reasonedVerdict }),
-        ),
+    // Result sections — only after Run
+    result && h(React.Fragment, null,
+      h(Section, { title: "Draft decision", defaultOpen: true },
+        h(ConsistencyBanner, { precedents: result.precedents }),
+        h(DraftDecision, { precedents: result.precedents, topRule: result.topRule }),
       ),
+
+      h(Section, { title: "Top precedents", defaultOpen: false, badge: result.precedents.length },
+        result.precedents.length === 0
+          ? h("div", { className: "muted" }, "No candidates scored > 0.")
+          : h("div", { className: "prec-list" },
+              result.precedents.map((r, i) =>
+                h(PrecedentAccordion, { key: r.record_id, r, rank: i + 1, defaultOpen: i === 0 })),
+            ),
+      ),
+
+      h(Section, { title: "Top rule", defaultOpen: false },
+        result.topRule
+          ? h(RuleCard, { rule: result.topRule })
+          : h("div", { className: "muted" }, "No rule matched — possible policy gap."),
+      ),
+
+      // Mira hand-off (collapsed by default)
+      h(Section, { title: "Send to Mira reviewer", defaultOpen: showHandoff },
+        h("div", { className: "hint", style: { marginBottom: 8 } },
+          "Build a JSON payload (candidate + precedents + top rule), copy into Mira chat, paste reply below."),
+        h("div", { className: "row tight", style: { marginBottom: 8 } },
+          h("button", { className: "secondary", onClick: onBuildPayload },
+            reasoningCopied ? "✓ Copied" : "Build & copy"),
+          payloadJson && h("button", { className: "secondary tiny", onClick: () => { navigator.clipboard && navigator.clipboard.writeText(payloadJson); } }, "Copy again"),
+        ),
+        payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
+          payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION),
+        h("label", null, "Paste Mira's JSON reply"),
+        h("textarea", {
+          rows: 6, value: reasonedRaw,
+          placeholder: '{"draft_decision":"...", "confidence":7, ...}',
+          onChange: e => setReasonedRaw(e.target.value),
+          style: { fontFamily: "var(--mono)", fontSize: "var(--fs-mono)" },
+        }),
+        h("div", { className: "row tight", style: { marginTop: 6 } },
+          h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim(), className: "secondary" }, "Render verdict"),
+          reasonedRaw && h("button", { className: "secondary tiny",
+            onClick: () => { setReasonedRaw(""); } }, "Clear"),
+        ),
+        reasonedError && h("div", { style: { color: "var(--error)", fontSize: "var(--fs-meta)", marginTop: 6 } }, reasonedError),
+      ),
+
+      reasonedVerdict && h(ReasonedVerdict, { v: reasonedVerdict }),
+    ),
+
+    !result && h("div", { className: "hint", style: { padding: "10px 4px" } },
+      "Tap “Run review” below to retrieve precedents and draft a decision."),
+  );
+}
+
+// ---------- Sticky action bar for Case view ----------
+function CaseActionBar({ result, loading, onRun, hasInputs }) {
+  return h("div", { className: "actionbar" },
+    h("div", { className: "grow" },
+      h("div", { className: "summary" },
+        result
+          ? h(React.Fragment, null,
+              h("b", null, result.precedents.length + " precedents"),
+              result.topRule ? " · top rule: " + (result.topRule.rule_name || "—") : " · no rule")
+          : h("span", null, hasInputs ? "Ready to run" : "Fill candidate inputs to enable")),
+    ),
+    h("button", { onClick: onRun, disabled: loading || !hasInputs, style: { flex: "0 0 auto" } },
+      loading ? "Running…" : (result ? "Re-run" : "Run review")),
+  );
+}
+
+// ---------- DiagnosticsView ----------
+function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1500);
+    return () => clearInterval(id);
+  }, []);
+  const logs = (window.__getLogRing ? window.__getLogRing() : []).slice(-80).reverse();
+  const fmtTs = (ms) => {
+    const d = new Date(ms);
+    const pad = (n) => (n < 10 ? "0" : "") + n;
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  };
+  const copyStamp = () => { try { navigator.clipboard.writeText("V2.7.0"); } catch(_){} };
+  const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
+    source_video_id: p.source_video_id || "",
+    issue: p.issue || "",
+    image_urls: (p.image_urls || []).length,
+  }));
+  return h(React.Fragment, null,
+    h(Section, { title: "Build", defaultOpen: true },
+      h("dl", { className: "dl-stack" },
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V2.7.0")),
+        h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
+        h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
+      ),
+    ),
+    h(Section, { title: "Corpus", defaultOpen: true },
+      h("dl", { className: "dl-stack" },
+        h("dt", null, "cases"), h("dd", null, String(stats.cases)),
+        h("dt", null, "rules"), h("dd", null, String(stats.rules)),
+        h("dt", null, "pending"), h("dd", null, String(stats.pending)),
+        h("dt", null, "issues"), h("dd", null, (corpus.facets && corpus.facets.issues || []).length + ""),
+        h("dt", null, "titles"), h("dd", null, (corpus.facets && corpus.facets.titles || []).length + ""),
+      ),
+      h("div", { className: "row tight", style: { marginTop: 8 } },
+        h("button", { className: "secondary", onClick: onReloadCorpus }, "Refresh corpus"),
+      ),
+    ),
+    h(Section, { title: "Pending sample", defaultOpen: false, badge: samplePending.length },
+      samplePending.length === 0
+        ? h("div", { className: "muted" }, "No pending rows.")
+        : h("table", { className: "diag-table" },
+            h("thead", null, h("tr", null, h("th", null, "ID"), h("th", null, "Issue"), h("th", null, "imgs"))),
+            h("tbody", null, samplePending.map((s, i) => h("tr", { key: i },
+              h("td", { className: "mono" }, s.source_video_id),
+              h("td", null, s.issue),
+              h("td", null, s.image_urls)))),
+          ),
+    ),
+    h(Section, { title: "Verbose logging", defaultOpen: false },
+      h("div", { className: "hint" }, "Session-only toggle (cleared on reload). Currently a placeholder — most modules log unconditionally."),
+      h("label", { style: { display: "flex", gap: 6, alignItems: "center", marginTop: 6 } },
+        h("input", { type: "checkbox", checked: !!verbose, onChange: e => setVerbose(e.target.checked) }),
+        h("span", null, verbose ? "Verbose ON" : "Verbose OFF"),
+      ),
+    ),
+    h(Section, { title: "Recent logs (last " + logs.length + ")", defaultOpen: true },
+      logs.length === 0
+        ? h("div", { className: "muted" }, "No logs yet.")
+        : h("div", { className: "log-list" },
+            logs.map((l, i) => h("div", { key: i, className: "log-row " + (l.level === "error" ? "error" : l.level === "warn" ? "warn" : "") },
+              h("span", { className: "log-ts" }, fmtTs(l.ts)),
+              h("span", null, l.text)))),
+    ),
+    h(Section, { title: "Design doc", defaultOpen: false },
+      h("div", { className: "hint" }, "Open the design doc in a new tab (host filesystem)."),
+      h("a", { href: "https://github.com/lichaowu/CaseReview", target: "_blank", rel: "noopener noreferrer", style: { color: "var(--primary)", fontSize: "var(--fs-meta)" } }, "github.com/lichaowu/CaseReview ↗"),
     ),
   );
 }
