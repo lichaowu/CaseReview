@@ -552,6 +552,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
+  try { console.log("[CaseReview] V2.5.6 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -604,7 +605,7 @@ async function loadCorpusFromBitable() {
         var clean = out
           .map(function(u){ return (typeof u === "string") ? u.trim() : ""; })
           .filter(function(u){ return /^https?:\/\//i.test(u); });
-        try { console.log("[CaseReview] image_urls parsed for", get(f, pendingIdx, "source_video_id"), ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw len:", (typeof raw === "string" ? raw.length : (Array.isArray(raw) ? raw.length : "n/a"))); } catch(e) {}
+        try { var _svid = get(f, pendingIdx, "source_video_id"); var _rawPrev = (typeof raw === "string") ? raw.slice(0,180) : (raw==null?"<null>":JSON.stringify(raw).slice(0,180)); console.log("[CaseReview] image_urls parsed for", _svid, ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw preview:", _rawPrev); } catch(e) { try { console.warn("[CaseReview] image_urls log failed:", e && e.message); } catch(_){} }
         return clean;
       })(),
     };
@@ -938,7 +939,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.5"),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.6"),
 
       h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
