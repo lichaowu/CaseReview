@@ -552,7 +552,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
-  try { console.log("[CaseReview] V2.5.7 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
+  try { console.log("[CaseReview] V2.6.0 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -566,6 +566,20 @@ async function loadCorpusFromBitable() {
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
       image_urls: (function(){
+        // V2.6.0: Prefer attachment field (image_attachments). Lark SDK returns
+        // [{token,name,type,size,url,tmpUrl}, ...] with short-lived signed *.feishu.cn URLs
+        // that bypass ibyteimg origin/referer restrictions. Falls back to legacy image_urls
+        // text field for un-migrated rows.
+        var att = readCell(f, pendingIdx, "image_attachments");
+        if (Array.isArray(att) && att.length) {
+          var attUrls = att
+            .map(function(a){ return a && (a.url || a.tmpUrl || a.tmp_url || a.link) || ""; })
+            .filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
+          if (attUrls.length) {
+            try { console.log("[CaseReview] image_attachments hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
+            return attUrls;
+          }
+        }
         var raw = readCell(f, pendingIdx, "image_urls");
         var out = [];
         var pushAll = function(arr){ if (Array.isArray(arr)) arr.forEach(function(x){ if (x != null) out.push(x); }); };
@@ -952,7 +966,7 @@ function InputPanel({ inputs, setInputs, onRun, loading, stats, facets, titleOpt
     h("div", { className: "head" }, "Case input"),
     h("div", { className: "body" },
       h("div", { className: "meta-row" },
-        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.5.7"),
+        `Corpus: ${stats.cases} cases · ${stats.rules} rules` + (stats.pending != null ? ` · ${stats.pending} pending` : "") + " · build V2.6.0"),
 
       h("label", null, "Source video ID" + (stats.pending ? ` (${stats.pending} pending — type or pick to auto-fill)` : " (optional — pre-fills from corpus)")),
       h("input", {
