@@ -750,11 +750,19 @@ async function loadCorpusFromBitable() {
 
   const rules = ruleRecs.map(r => {
     const f = r.fields || {};
+    // V3.0: policy_title widened to MultiSelect — preserve as array.
+    // L1 / L2 carry one tag (their owning policy); L3 carries owning + neighbor(s).
+    const ptArr = getArr(f, rulesIdx, "policy_title");
+    const ptScalar = ptArr.length ? ptArr[0] : (get(f, rulesIdx, "policy_title") || get(f, rulesIdx, "rule_name"));
     return {
       record_id: r.recordId || r.record_id,
       rule_name: get(f, rulesIdx, "rule_name"),
+      // V3.0: rule_type SingleSelect — "L1 — Threshold" / "L2 — Exception" / "L3 — Disambiguation".
+      // Empty string for legacy rows without the field.
+      rule_type: get(f, rulesIdx, "rule_type"),
       issue: get(f, rulesIdx, "issue") || get(f, rulesIdx, "policy_area"),
-      policy_title: get(f, rulesIdx, "policy_title") || get(f, rulesIdx, "rule_name"),
+      policy_title: ptScalar,            // legacy scalar — used by precedent filters
+      policy_titles: ptArr.length ? ptArr : (ptScalar ? [ptScalar] : []),  // V3.0 array
       rule_description: get(f, rulesIdx, "plain_description"),
       rule_text: get(f, rulesIdx, "plain_rule_text"),
       examples: get(f, rulesIdx, "example_cases"),
@@ -970,17 +978,144 @@ function normScores(arr) {
   return arr.map(r => ({ ...r, sim: Math.min(1, r.score / max) }));
 }
 
-// ---------- Rule ranking ----------
+// ---------- Rule ranking (V3.0 — L1 / L2 / L3 aware) ----------
+const RULE_TYPE_L1 = "L1 — Threshold";
+const RULE_TYPE_L2 = "L2 — Exception";
+const RULE_TYPE_L3 = "L3 — Disambiguation";
+
+function _ruleTypeOf(r) {
+  // tolerate dash variants and missing field on legacy rows
+  const t = (r && r.rule_type ? String(r.rule_type) : "").replace(/\s+/g, " ").trim();
+  if (/^L1\b/i.test(t)) return RULE_TYPE_L1;
+  if (/^L2\b/i.test(t)) return RULE_TYPE_L2;
+  if (/^L3\b/i.test(t)) return RULE_TYPE_L3;
+  return ""; // unknown / legacy
+}
+
+function _bm25LiteScore(r, queryTokens) {
+  const hay = tokenize(
+    (r.rule_name || "") + " " +
+    (r.rule_description || "") + " " +
+    (r.rule_text || "") + " " +
+    (r.examples || "")
+  );
+  const set = new Set(hay);
+  let s = 0;
+  for (const q of queryTokens) if (set.has(q)) s += 1;
+  return s;
+}
+
+// Backwards-compatible: returns ALL rules scored, sorted by score desc.
+// V3.0 callers should prefer rankCandidateL1 / rankL3 / rankL2 below.
 function rankRules(rules, queryTokens) {
-  const scored = rules.map(r => {
-    const hay = tokenize((r.rule_name || "") + " " + (r.plain_description || "") + " " + (r.plain_rule_text || ""));
-    const set = new Set(hay);
-    let s = 0;
-    for (const q of queryTokens) if (set.has(q)) s += 1;
-    return { ...r, score: s };
+  const scored = (rules || []).map(r => {
+    const score = _bm25LiteScore(r, queryTokens);
+    return Object.assign({}, r, { score });
   });
   scored.sort((a, b) => b.score - a.score);
   return scored;
+}
+
+// V3.0: candidate slot — top-1 over L1 — Threshold rules only.
+// Returns { top, all } where `all` is the full L1 ranking (used by the disambiguation trigger).
+function rankCandidateL1(rules, queryTokens) {
+  const l1 = (rules || []).filter(r => _ruleTypeOf(r) === RULE_TYPE_L1);
+  // Legacy rows without rule_type still need to be reachable — fall back to "everything" only when ZERO L1 rules exist in scope.
+  const pool = l1.length ? l1 : (rules || []);
+  const scored = pool.map(r => Object.assign({}, r, { score: _bm25LiteScore(r, queryTokens) }));
+  scored.sort((a, b) => b.score - a.score);
+  const top = (scored[0] && scored[0].score > 0) ? scored[0] : null;
+  return { top, all: scored, isLegacyFallback: !l1.length };
+}
+
+// V3.0: disambiguation slot — fires when L1 candidates from ≥2 distinct policy_titles
+// score above the floor. Returns L3 rules whose policy_titles array intersects the
+// dominant + runner-up policies.
+const DISAMBIGUATION_SCORE_FLOOR = 1; // at least one query token must hit
+const DISAMBIGUATION_MIN_RUNNERUP_RATIO = 0.6; // runner-up must be ≥60% of leader
+
+function findDisambiguationCandidates(rules, l1Ranking) {
+  if (!Array.isArray(l1Ranking) || l1Ranking.length < 2) return [];
+  const leader = l1Ranking[0];
+  if (!leader || leader.score < DISAMBIGUATION_SCORE_FLOOR) return [];
+  // Walk the ranking and collect distinct policies above the floor with score≥ratio*leader.
+  const policiesHit = new Set();
+  if (leader.policy_title) policiesHit.add(leader.policy_title);
+  for (let i = 1; i < l1Ranking.length; i++) {
+    const r = l1Ranking[i];
+    if (!r || r.score < DISAMBIGUATION_SCORE_FLOOR) break;
+    if (r.score < leader.score * DISAMBIGUATION_MIN_RUNNERUP_RATIO) break;
+    if (r.policy_title) policiesHit.add(r.policy_title);
+  }
+  if (policiesHit.size < 2) return [];
+
+  const policies = Array.from(policiesHit);
+  const out = [];
+  for (const r of rules || []) {
+    if (_ruleTypeOf(r) !== RULE_TYPE_L3) continue;
+    const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
+    const hits = policies.filter(p => titles.indexOf(p) !== -1).length;
+    if (hits >= 2) {
+      out.push(Object.assign({}, r, {
+        trigger_reason:
+          "Retriever surfaced L1 candidates from ≥2 policies (" + policies.join(" + ") +
+          "); this L3 covers " + hits + " of them."
+      }));
+    }
+  }
+  // Limit to top-3 by name (deterministic) to keep the prompt compact.
+  return out.slice(0, 3);
+}
+
+// V3.0: exception slot — fires when the candidate query matches vertical-specific
+// exemption signal patterns. Returns L2 rules owned by the candidate's policy.
+const EXEMPTION_SIGNAL_PATTERNS = {
+  // generic patterns — apply across verticals
+  generic: [
+    { name: "educational",  re: /\b(educational|education|sex[-\s]?ed|pedagog|curriculum|lecture|psa|public service announcement|awareness)\b/i },
+    { name: "news",         re: /\b(news|journalism|reporter|reporting|broadcast|documentary|press)\b/i },
+    { name: "fictional",    re: /\b(fiction(al)?|scripted|film|movie|tv show|series|drama|set|production credit|cosplay)\b/i },
+    { name: "artistic",     re: /\b(art(istic|work)?|gallery|museum|painting|sculpture|fine art|theatre|performance art)\b/i },
+    { name: "animation",    re: /\b(animation|animated|cartoon|3d render|cgi|illustrated|drawn)\b/i },
+    { name: "fitness",      re: /\b(workout|gym|fitness|yoga|training|athletic|sport|exercise|cross[-\s]?fit)\b/i },
+    { name: "medical",      re: /\b(medical|clinical|hospital|clinic|doctor|nurse|surgeon|anatomic|health[-\s]?care)\b/i },
+    { name: "humor",        re: /\b(satir(e|ical)|parody|comedic|comedy|skit|slapstick|joke|meme)\b/i },
+    { name: "counter_speech", re: /\b(counter[-\s]?speech|denounce|condemn|anti[-\s]?bully|anti[-\s]?hate|allyship|stand against)\b/i },
+    { name: "recovery",     re: /\b(recovery|in recovery|sober|harm reduction|survivor|support group|mental health awareness|treatment)\b/i },
+  ],
+};
+
+function detectExemptionSignals(queryText) {
+  if (!queryText) return [];
+  const hits = [];
+  for (const p of EXEMPTION_SIGNAL_PATTERNS.generic) {
+    if (p.re.test(queryText)) hits.push(p.name);
+  }
+  return hits;
+}
+
+function findExceptionCandidates(rules, candidatePolicy, queryText) {
+  const signals = detectExemptionSignals(queryText);
+  if (!signals.length) return [];
+  const out = [];
+  for (const r of rules || []) {
+    if (_ruleTypeOf(r) !== RULE_TYPE_L2) continue;
+    // L2 must be owned by the candidate's policy (or be the universal Public Value gate L2.01)
+    const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
+    const isUniversal = /public value|p1|p2|p3|p4|^l2\.01\b/i.test(r.rule_name || "") || /public value/i.test(r.rule_text || "");
+    const ownsPolicy = candidatePolicy && titles.indexOf(candidatePolicy) !== -1;
+    if (!isUniversal && !ownsPolicy) continue;
+    // Score against the same query — keeps deterministic ordering.
+    const ruleHay = ((r.rule_name || "") + " " + (r.rule_text || "") + " " + (r.examples || "")).toLowerCase();
+    const matched = signals.filter(s => ruleHay.indexOf(s.replace(/_/g, " ")) !== -1 || ruleHay.indexOf(s) !== -1);
+    if (!matched.length && !isUniversal) continue;
+    out.push(Object.assign({}, r, {
+      trigger_reason:
+        "Candidate signals match exemption pattern(s): " +
+        (matched.length ? matched.join(", ") : "universal L2 gate (Public Value Parameters)") + "."
+    }));
+  }
+  return out.slice(0, 4);
 }
 
 // ---------- Mira payload builder (V2.3) ----------
@@ -993,7 +1128,21 @@ function truncStr(t, n) {
   return t.slice(0, n) + "…";
 }
 
-function buildPayload({ inputs, precedents, topRule, issue }) {
+function _ruleToPayloadCompanion(r) {
+  if (!r) return null;
+  return {
+    rule_id: r.rule_id || r.record_id || "",
+    rule_name: r.rule_name || "",
+    rule_type: _ruleTypeOf(r) || (r.rule_type || ""),
+    policy_title: Array.isArray(r.policy_titles) && r.policy_titles.length
+      ? r.policy_titles
+      : (r.policy_title ? [r.policy_title] : []),
+    rule_text: truncStr(r.rule_text, 1200),
+    trigger_reason: r.trigger_reason || ""
+  };
+}
+
+function buildPayload({ inputs, precedents, topRule, companionRules, issue }) {
   const issueType = issue || inputs.issue || ISSUE_DEFAULT || "(any)";
   const candidate = {
     item_id: inputs.item_id || "",
@@ -1026,21 +1175,33 @@ function buildPayload({ inputs, precedents, topRule, issue }) {
       rule_applied: (r.rule_applied_id || "") + (r.rule_applied_name ? " " + r.rule_applied_name : ""),
     };
   });
+  // V3.0: candidate_rule is ALWAYS L1 (the picker enforces this); rule_type included.
   const rule = topRule ? {
     rule_id: topRule.rule_id || topRule.record_id || "",
     rule_name: topRule.rule_name || "",
+    rule_type: _ruleTypeOf(topRule) || RULE_TYPE_L1,
     issue: topRule.issue || "",
+    policy_area: topRule.issue || "",
     policy_title: topRule.policy_title || "",
     rule_text: truncStr(topRule.rule_text, 1500),
     examples: truncStr(topRule.examples, 600),
   } : null;
+  // V3.0: companion_rules — disambiguation (L3) and exception (L2). Empty arrays are
+  // semantically meaningful: skills will flip the corresponding policy_gap.* flag.
+  const cr = companionRules || {};
+  const companion = {
+    disambiguation: (cr.disambiguation || []).map(_ruleToPayloadCompanion).filter(Boolean),
+    exception:      (cr.exception      || []).map(_ruleToPayloadCompanion).filter(Boolean),
+  };
   return {
     schema: "case-review-payload",
     version: PAYLOAD_VERSION,
     issue: issueType,
+    policy_area: issueType,                    // V3.0 alias matching skill input contract
     candidate,
     precedents: precs,
     candidate_rule: rule,
+    companion_rules: companion,
   };
 }
 
@@ -1278,11 +1439,45 @@ function RuleCard({ rule }) {
 }
 
 // ---------- Reasoned verdict (compact) ----------
+function _chainRoleKind(role) {
+  const r = (role || "").toLowerCase();
+  if (r === "triggering")    return "flag";
+  if (r === "exempting")     return "pass";
+  if (r === "disambiguating") return "sim";
+  return "muted";
+}
+function _gapDots(gap) {
+  if (!gap || typeof gap !== "object") return null;
+  const items = [
+    ["precedent",      gap.precedent_gap],
+    ["disambiguation", gap.disambiguation_gap],
+    ["exception",      gap.exception_gap],
+  ];
+  return h("div", { className: "kvp", style: { display: "flex", gap: 6, alignItems: "center" } },
+    h("span", { className: "muted mono" }, "policy gap:"),
+    items.map(([label, on], i) => h("span", {
+      key: i,
+      title: label + (on ? " gap" : " ok"),
+      style: {
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "1px 6px", borderRadius: 10,
+        background: on ? "rgba(198,69,69,0.12)" : "rgba(93,184,114,0.12)",
+        color: on ? "var(--error)" : "var(--success)",
+        fontSize: "var(--fs-mono)", fontFamily: "var(--mono)"
+      }
+    }, (on ? "● " : "○ ") + label))
+  );
+}
+
 function ReasonedVerdict({ v }) {
   if (!v) return null;
   const dec = (v.draft_decision || "").toUpperCase();
   const decKind = dec === "FLAG" ? "flag" : dec === "PASS" ? "pass" : "sim";
   const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
+  // V3.0: derive legacy boolean if not provided
+  const gap = v.policy_gap && typeof v.policy_gap === "object" ? v.policy_gap : null;
+  const gapAny = gap ? !!(gap.precedent_gap || gap.disambiguation_gap || gap.exception_gap)
+                     : !!v.policy_gap_flag;
   return h("div", { className: "section open", style: { borderColor: "var(--primary)" } },
     h("div", { className: "sec-head", style: { background: "var(--surface-card)" } },
       h("span", null, "🧠 Reasoned verdict"),
@@ -1296,13 +1491,39 @@ function ReasonedVerdict({ v }) {
         (typeof v.confidence === "number") && h(Tag, { kind: v.confidence >= 7 ? "pass" : v.confidence <= 4 ? "flag" : "sim" },
           "conf " + v.confidence + "/10"),
         v.grey && h(Tag, { kind: "flag" }, "GREY"),
-        v.policy_gap_flag && h(Tag, { kind: "flag" }, "POLICY GAP"),
+        gapAny && h(Tag, { kind: "flag" }, "POLICY GAP"),
       ),
-      v.applied_rule && h("dl", { className: "dl-stack" },
-        h("dt", null, "applied rule"), h("dd", null, v.applied_rule),
-        v.rule_rationale && h("dt", null, "rationale"),
-        v.rule_rationale && h("dd", null, v.rule_rationale),
-      ),
+
+      // V3.0: applied_rule_chain — render L1 → L3 → L2 with role badges. Falls back to legacy applied_rule.
+      Array.isArray(v.applied_rule_chain) && v.applied_rule_chain.length > 0
+        ? h("div", { style: { marginTop: 4, marginBottom: 8 } },
+            h("div", { className: "muted mono", style: { marginBottom: 4 } }, "APPLIED RULE CHAIN"),
+            h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" } },
+              v.applied_rule_chain.map((node, i) => h(React.Fragment, { key: i },
+                i > 0 && h("span", { className: "muted mono", style: { fontSize: "var(--fs-mono)" } }, "→"),
+                h("span", { style: { display: "inline-flex", flexDirection: "column", gap: 2 } },
+                  h(Tag, { kind: _chainRoleKind(node.role) },
+                    (node.rule_type || "").replace(" — ", " ") + " · " + (node.role || "")),
+                  h("span", { className: "mono", style: { fontSize: "var(--fs-mono)" } },
+                    node.rule_name || node.rule_id || "—"),
+                  node.note && h("span", { className: "muted", style: { fontSize: "var(--fs-mono)", maxWidth: 280 } },
+                    node.note)
+                )
+              )))
+          )
+        : (v.applied_rule && h("dl", { className: "dl-stack" },
+            h("dt", null, "applied rule"), h("dd", null, v.applied_rule),
+            v.rule_rationale && h("dt", null, "rationale"),
+            v.rule_rationale && h("dd", null, v.rule_rationale),
+          )),
+
+      // V3.0: structured policy_gap dots
+      gap && _gapDots(gap),
+
+      v.rule_rationale && Array.isArray(v.applied_rule_chain) && v.applied_rule_chain.length > 0 &&
+        h("div", { className: "kvp", style: { marginTop: 6 } },
+          h("span", { className: "muted mono" }, "rationale: "),
+          h("span", null, v.rule_rationale)),
 
       Array.isArray(v.precedent_analysis) && v.precedent_analysis.length > 0 && h("div", { style: { marginTop: 10 } },
         h("div", { className: "muted mono", style: { marginBottom: 4 } }, "PRECEDENT ANALYSIS"),
@@ -1327,10 +1548,16 @@ function ReasonedVerdict({ v }) {
           h("summary", null, "[VISUAL]"), h("pre", null, v.reasoning.visual_analysis)),
         v.reasoning.text_analysis && h("details", null,
           h("summary", null, "[TEXT]"), h("pre", null, v.reasoning.text_analysis)),
+        v.reasoning.disambiguation && h("details", { open: true },
+          h("summary", null, "[DISAMBIGUATION]"), h("pre", null, v.reasoning.disambiguation)),
         v.reasoning.first_pass && h("details", { open: true },
           h("summary", null, "[FIRST PASS]"), h("pre", null, v.reasoning.first_pass)),
+        (v.reasoning.prosecutor_case && !v.reasoning.first_pass) && h("details", { open: true },
+          h("summary", null, "[PROSECUTOR]"), h("pre", null, v.reasoning.prosecutor_case)),
         v.reasoning.second_pass && h("details", { open: true },
           h("summary", null, "[SECOND PASS]"), h("pre", null, v.reasoning.second_pass)),
+        (v.reasoning.defense_review && !v.reasoning.second_pass) && h("details", { open: true },
+          h("summary", null, "[DEFENSE]"), h("pre", null, v.reasoning.defense_review)),
         v.reasoning.verdict && h("details", { open: true },
           h("summary", null, "[VERDICT]"), h("pre", null, v.reasoning.verdict)),
       ),
@@ -1369,7 +1596,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V2.7.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.0.0")),
     );
   }
   if (corpusError) {
@@ -1380,7 +1607,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V2.7.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.0.0")),
     );
   }
   if (!corpus) return null;
@@ -1476,13 +1703,33 @@ function MainApp({ corpus, onReloadCorpus }) {
         ranked = ranked.filter(r => r.raw.case_id !== inputs.item_id && r.raw.record_id !== inputs.item_id);
       }
       ranked = normScores(ranked.slice(0, inputs.k));
-      const rulesRanked = rankRules(
-        corpus.rules.filter(r =>
-          (!inputs.issue || r.issue === inputs.issue) &&
-          (!inputs.title || r.policy_title === inputs.title)
-        ), qtok,
+
+      // V3.0: scope rules to current vertical, then split into L1 candidate / L3 disambiguation / L2 exception.
+      const scopedRules = corpus.rules.filter(r =>
+        (!inputs.issue || r.issue === inputs.issue) &&
+        // policy_title filter only applies when set on input AND the rule carries a matching tag.
+        // For L3 rules, the tag is in policy_titles[] (multi); for L1/L2, in policy_title (scalar).
+        (!inputs.title || r.policy_title === inputs.title || (Array.isArray(r.policy_titles) && r.policy_titles.indexOf(inputs.title) !== -1))
       );
-      setResult({ precedents: ranked, topRule: rulesRanked[0] && rulesRanked[0].score > 0 ? rulesRanked[0] : null, query: queryText });
+      const { top: topL1, all: l1Ranking, isLegacyFallback } = rankCandidateL1(scopedRules, qtok);
+      const candidatePolicy = topL1 ? topL1.policy_title : null;
+      const disambiguation = findDisambiguationCandidates(scopedRules, l1Ranking);
+      const exceptionRules = findExceptionCandidates(scopedRules, candidatePolicy, queryText);
+
+      try {
+        console.log("[CaseReview] V3.0 retrieval:",
+          "L1=" + (topL1 ? topL1.rule_name : "—") + (isLegacyFallback ? " (legacy fallback)" : ""),
+          "L3=" + disambiguation.length,
+          "L2=" + exceptionRules.length);
+      } catch(_) {}
+
+      setResult({
+        precedents: ranked,
+        topRule: topL1,
+        companionRules: { disambiguation, exception: exceptionRules },
+        l1Ranking,
+        query: queryText
+      });
       setLoading(false);
     }, 20);
   }, [inputs, index, corpus]);
@@ -1490,7 +1737,11 @@ function MainApp({ corpus, onReloadCorpus }) {
   const onBuildPayload = useCallback(() => {
     if (!result) return;
     const payload = buildPayload({
-      inputs, precedents: result.precedents, topRule: result.topRule, issue: inputs.issue,
+      inputs,
+      precedents: result.precedents,
+      topRule: result.topRule,
+      companionRules: result.companionRules,
+      issue: inputs.issue,
     });
     const txt = JSON.stringify(payload, null, 2);
     setPayloadJson(txt);
@@ -1533,7 +1784,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V2.7.1"),
+      "build V3.0.0"),
   );
 
   // ---- Views ----
@@ -1770,7 +2021,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V2.7.1"); };
+  const copyStamp = () => { safeCopy("V3.0.0"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -1779,7 +2030,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V2.7.1")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.0.0")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
