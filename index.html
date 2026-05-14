@@ -770,7 +770,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
-  try { console.log("[CaseReview] V2.6.0 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
+  try { console.log("[CaseReview] V3.1.2 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -783,78 +783,48 @@ async function loadCorpusFromBitable() {
       asr_text: get(f, pendingIdx, "asr_text"),
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
-      image_urls: (function(){
-        // V2.6.0: Prefer attachment field (image_attachments). Lark SDK returns
-        // [{token,name,type,size,url,tmpUrl}, ...] with short-lived signed *.feishu.cn URLs
-        // that bypass ibyteimg origin/referer restrictions. Falls back to legacy image_urls
-        // text field for un-migrated rows.
+      _keyframeTokens: (function(){
+        // V3.1.2: Read attachment tokens from "keyframes" field.
+        // Actual URLs resolved async after load via table.getAttachmentUrl()
         var att = readCell(f, pendingIdx, "keyframes");
         if (Array.isArray(att) && att.length) {
-          var attUrls = att
-            .map(function(a){ return a && (a.url || a.tmpUrl || a.tmp_url || a.link) || ""; })
-            .filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
-          if (attUrls.length) {
-            try { console.log("[CaseReview] keyframes hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
-            return attUrls;
-          }
+          return att.filter(function(a){ return a && a.token; });
         }
-        var raw = readCell(f, pendingIdx, "image_urls");
-        var out = [];
-        var pushAll = function(arr){ if (Array.isArray(arr)) arr.forEach(function(x){ if (x != null) out.push(x); }); };
-        if (raw == null) { /* empty */ }
-        else if (Array.isArray(raw)) {
-          pushAll(raw.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.name||x.link||x.url)) || ""; }));
-        } else if (typeof raw === "object") {
-          var t0 = raw.text || raw.name || raw.link || raw.url;
-          if (t0) out.push(String(t0));
-        } else {
-          var str = String(raw).trim();
-          if (str) {
-            var consumed = false;
-            // 1) JSON parse (handles '["url1","url2"]' with \u0026 encoded ampersands)
-            if (str.charAt(0) === "[" || str.charAt(0) === "{") {
-              try {
-                var parsed = JSON.parse(str);
-                if (Array.isArray(parsed)) {
-                  pushAll(parsed.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.url||x.link)) || ""; }));
-                  consumed = true;
-                } else if (parsed && typeof parsed === "object") {
-                  var tv = parsed.text || parsed.url || parsed.link;
-                  if (tv) { out.push(String(tv)); consumed = true; }
-                }
-              } catch (e) { /* fall through */ }
-            }
-            // 2) Regex-extract every http(s):// URL — also runs as fallback when JSON.parse fails on truncated input
-            if (!consumed) {
-              // Decode \u0026 -> & and similar before regex
-              var decoded = str.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
-              var matches = decoded.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
-              if (matches && matches.length) {
-                // Bitable text cells truncate at ~50k chars. If JSON.parse failed, the last URL is likely truncated.
-                // Drop trailing URLs that look incomplete: missing x-signature or ending with stray % / & (signature truncated).
-                var jsonFailed = (str.charAt(0) === "[" || str.charAt(0) === "{");
-                if (jsonFailed && matches.length > 0) {
-                  var last = matches[matches.length - 1];
-                  var looksTruncated = !/x-signature=[^&\s]+/.test(last) || /[%&]$/.test(last) || /%[0-9A-Fa-f]?$/.test(last);
-                  if (looksTruncated) {
-                    try { console.warn("[CaseReview] dropping truncated trailing URL:", last.slice(-60)); } catch(_){}
-                    matches = matches.slice(0, -1);
-                  }
-                }
-                pushAll(matches);
-              }
-            }
-          }
-        }
-        // STRICT FILTER: only keep absolute http(s) URLs — no fragments, no relative paths
-        var clean = out
-          .map(function(u){ return (typeof u === "string") ? u.trim() : ""; })
-          .filter(function(u){ return /^https?:\/\//i.test(u); });
-        try { var _svid = get(f, pendingIdx, "source_video_id"); var _rawPrev = (typeof raw === "string") ? raw.slice(0,180) : (raw==null?"<null>":JSON.stringify(raw).slice(0,180)); console.log("[CaseReview] image_urls parsed for", _svid, ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw preview:", _rawPrev); } catch(e) { try { console.warn("[CaseReview] image_urls log failed:", e && e.message); } catch(_){} }
-        return clean;
+        return [];
       })(),
+      _recordId: r.recordId || r.record_id,
+      image_urls: [],
     };
   }).filter(p => p.source_video_id);
+
+  // V3.1.2: Resolve attachment tokens to URLs via Bitable SDK
+  if (pendingTbl) {
+    const keyframesFieldId = pendingIdx && pendingIdx.byName && pendingIdx.byName["keyframes"];
+    if (keyframesFieldId) {
+      try {
+        const field = await pendingTbl.getFieldById(keyframesFieldId);
+        // getAttachmentUrls returns [{token, url}...] for a given record
+        await Promise.all(pending.map(async (p) => {
+          if (!p._keyframeTokens || !p._keyframeTokens.length) return;
+          try {
+            const urls = await field.getAttachmentUrls(p._recordId);
+            if (Array.isArray(urls) && urls.length) {
+              p.image_urls = urls.map(u => (typeof u === "string") ? u : (u && u.url || "")).filter(Boolean);
+            }
+            if (p.image_urls.length) {
+              try { console.log("[CaseReview] keyframes resolved for", p.source_video_id, ":", p.image_urls.length, "URLs"); } catch(_){}
+            }
+          } catch (e) {
+            try { console.warn("[CaseReview] getAttachmentUrls failed for", p.source_video_id, e && e.message); } catch(_){}
+          }
+        }));
+      } catch (e) {
+        try { console.warn("[CaseReview] keyframes field resolution failed:", e && e.message); } catch(_){}
+      }
+    } else {
+      try { console.warn("[CaseReview] keyframes fieldId not found in pendingIdx"); } catch(_){}
+    }
+  }
 
   // Distinct facets for filter dropdowns
   const issuesSet = new Set();
