@@ -1286,7 +1286,7 @@ async function safeCopy(text) {
   }
 }
 window.__safeCopy = safeCopy;
-// ---------- V3.1.0: Copy keyframes as composite image to clipboard ----------
+// ---------- V3.1.1: Copy keyframes as composite image to clipboard ----------
 async function copyKeyframesToClipboard(urls) {
   if (!urls || !urls.length) return false;
   try {
@@ -1368,44 +1368,16 @@ function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
 }
 
-// ---------- Carousel (V2.7.0) ----------
-function Carousel({ urls }) {
-  const [i, setI] = useState(0);
-  const [err, setErr] = useState({});
-  const list = Array.isArray(urls) ? urls : [];
-  if (!list.length) return null;
-  const cur = list[Math.min(i, list.length - 1)];
-  const onPrev = () => setI(x => Math.max(0, x - 1));
-  const onNext = () => setI(x => Math.min(list.length - 1, x + 1));
-  const onErr = () => setErr(e => Object.assign({}, e, { [i]: true }));
-  return h("div", { className: "carousel" },
-    h("div", { className: "car-frame" },
-      err[i]
-        ? h("div", { className: "car-fallback" }, "Image blocked by CDN. ",
-            h("a", { href: cur, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--primary)" } }, "Open in tab ↗"))
-        : h("img", {
-            src: cur,
-            alt: "keyframe " + (i + 1),
-            referrerPolicy: "no-referrer",
-            loading: i === 0 ? "eager" : "lazy",
-            onError: onErr,
-          }),
-      h("div", { className: "car-counter" }, (i + 1) + " / " + list.length),
-      list.length > 1 && h("div", { className: "car-controls" },
-        h("button", { className: "car-btn", onClick: onPrev, disabled: i === 0, "aria-label": "previous" }, "‹"),
-        h("button", { className: "car-btn", onClick: onNext, disabled: i === list.length - 1, "aria-label": "next" }, "›"),
-      ),
-    ),
-    list.length > 1 && h("div", { className: "car-dots" },
-      list.map((_, j) => h("button", {
-        key: j,
-        className: "car-dot " + (j === i ? "active" : ""),
-        onClick: () => setI(j),
-        "aria-label": "frame " + (j + 1),
-      })),
-    ),
-    h("a", { className: "car-open", href: cur, target: "_blank", rel: "noopener noreferrer" },
-      "Open frame " + (i + 1) + " in new tab ↗"),
+// ---------- KeyframesInfo (V3.1.1 — replaces Carousel, no URL rendering) ----------
+function KeyframesInfo({ count, onCopy, copied }) {
+  if (!count) return null;
+  return h("div", { style: { padding: "12px 0", textAlign: "center" } },
+    h("div", { style: { marginBottom: 8, color: "var(--body)", fontSize: "var(--fs-base)" } },
+      "🖼 " + count + " keyframe" + (count > 1 ? "s" : "") + " attached"),
+    h("div", { className: "hint", style: { marginBottom: 8 } },
+      "Images stored as Bitable attachments. Use the copy button to composite them for Mira review."),
+    h("button", { className: "secondary", onClick: onCopy, style: { margin: "0 auto", display: "block" } },
+      copied ? ("✓ " + count + " frames copied to clipboard") : ("Copy " + count + " keyframes as image")),
   );
 }
 
@@ -1642,7 +1614,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.1")),
     );
   }
   if (corpusError) {
@@ -1653,7 +1625,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.1")),
     );
   }
   if (!corpus) return null;
@@ -1838,7 +1810,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.1.0"),
+      "build V3.1.1"),
   );
 
   // ---- Views ----
@@ -1914,14 +1886,10 @@ function QueueView({ pending, onPick, onNewCase }) {
 }
 
 function QueueCard({ p, onPick }) {
-  const thumb = (p.image_urls && p.image_urls[0]) || "";
-  const [err, setErr] = useState(false);
   return h("div", { className: "queue-card", onClick: onPick, role: "button", tabIndex: 0,
       onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } } },
     h("div", { className: "qc-thumb" },
-      thumb && !err
-        ? h("img", { src: thumb, alt: "", referrerPolicy: "no-referrer", loading: "lazy", onError: () => setErr(true) })
-        : h("span", null, (p.image_urls && p.image_urls.length) ? "🖼" : "—"),
+      h("span", null, (p.image_urls && p.image_urls.length) ? ("🖼 " + p.image_urls.length) : "—"),
     ),
     h("div", { className: "qc-meta" },
       h("div", { className: "qc-id" }, p.source_video_id || "(no id)"),
@@ -1987,9 +1955,9 @@ function CaseView({
       ),
     ),
 
-    // Carousel section
+    // Keyframes info section (V3.1.1 — no URL image rendering)
     urls.length > 0 && h(Section, { title: "Keyframes", defaultOpen: true, badge: urls.length },
-      h(Carousel, { urls }),
+      h(KeyframesInfo, { count: urls.length, onCopy: onCopyKeyframes, copied: keyframesCopied }),
     ),
 
     // Result sections — only after Run
@@ -2076,7 +2044,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.1.0"); };
+  const copyStamp = () => { safeCopy("V3.1.1"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2085,7 +2053,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.0")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.1")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
