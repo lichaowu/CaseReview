@@ -1437,37 +1437,6 @@ function ConsistencyBanner({ precedents }) {
   return h("div", { className: "banner mixed" },
     "⚠ Mixed — " + flags + " FLAG / " + passes + " PASS in top-" + precedents.length + ". Grey case.");
 }
-
-) {
-  if (!precedents.length) {
-    return h("div", { className: "decision-box" },
-      h("h4", null, "Draft decision"),
-      h("div", { className: "d-row" }, h("b", null, "decision"), h("span", { className: "muted" }, "no precedent — author new rule")),
-      h("div", { className: "d-row" }, h("b", null, "case_type"), h(Tag, { kind: "grey" }, "grey (novel)")),
-    );
-  }
-  const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
-  const passes = precedents.filter(p => p.raw.decision === "PASS").length;
-  const total = flags + passes;
-  const mixed = flags > 0 && passes > 0;
-  const decision = flags > passes ? "FLAG" : (passes > flags ? "PASS" : "—");
-  const caseType = mixed ? "grey" : "routine";
-  const topSim = precedents[0].sim;
-  const confidence = topSim > 0.7 && !mixed ? "high" : topSim > 0.4 || mixed ? "medium" : "low";
-  return h("div", { className: "decision-box" },
-    h("h4", null, "Draft decision"),
-    h("div", { className: "d-row" }, h("b", null, "decision"),
-      h(Tag, { kind: decision === "FLAG" ? "flag" : "pass" }, decision),
-      h("span", { className: "muted mono" }, "(" + Math.max(flags, passes) + "/" + total + ")")),
-    h("div", { className: "d-row" }, h("b", null, "type"),
-      h(Tag, { kind: caseType === "grey" ? "grey" : "routine" }, caseType)),
-    h("div", { className: "d-row" }, h("b", null, "rule"),
-      topRule ? h("span", { className: "mono" }, topRule.rule_name) : h("span", { className: "muted" }, "no rule")),
-    h("div", { className: "d-row" }, h("b", null, "conf."),
-      h("span", null, confidence, " ", h("span", { className: "muted mono" }, "(sim " + topSim.toFixed(2) + ")"))),
-  );
-}
-
 // ---------- Precedent (accordion item) ----------
 function PrecedentAccordion({ r, rank, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
