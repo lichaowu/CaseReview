@@ -1286,7 +1286,7 @@ async function safeCopy(text) {
   }
 }
 window.__safeCopy = safeCopy;
-// ---------- V3.1.1: Copy keyframes as composite image to clipboard ----------
+// ---------- V3.1.2: Copy keyframes as composite image to clipboard ----------
 async function copyKeyframesToClipboard(urls) {
   if (!urls || !urls.length) return false;
   try {
@@ -1368,16 +1368,33 @@ function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
 }
 
-// ---------- KeyframesInfo (V3.1.1 — replaces Carousel, no URL rendering) ----------
-function KeyframesInfo({ count, onCopy, copied }) {
-  if (!count) return null;
-  return h("div", { style: { padding: "12px 0", textAlign: "center" } },
-    h("div", { style: { marginBottom: 8, color: "var(--body)", fontSize: "var(--fs-base)" } },
-      "🖼 " + count + " keyframe" + (count > 1 ? "s" : "") + " attached"),
-    h("div", { className: "hint", style: { marginBottom: 8 } },
-      "Images stored as Bitable attachments. Use the copy button to composite them for Mira review."),
-    h("button", { className: "secondary", onClick: onCopy, style: { margin: "0 auto", display: "block" } },
-      copied ? ("✓ " + count + " frames copied to clipboard") : ("Copy " + count + " keyframes as image")),
+// ---------- KeyframesPreview (V3.1.2 — thumbnail grid from attachment URLs + copy) ----------
+function KeyframesPreview({ urls, onCopy, copied }) {
+  const [errors, setErrors] = useState({});
+  const list = Array.isArray(urls) ? urls : [];
+  if (!list.length) return null;
+  const onImgError = (idx) => setErrors(e => Object.assign({}, e, { [idx]: true }));
+  return h("div", { style: { padding: "4px 0" } },
+    h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "4px", marginBottom: 8 } },
+      list.slice(0, 12).map((url, i) =>
+        h("div", { key: i, style: { position: "relative", aspectRatio: "4/3", background: "var(--surface-dark)", borderRadius: 4, overflow: "hidden" } },
+          errors[i]
+            ? h("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted-soft)", fontSize: 11 } }, "# " + (i+1))
+            : h("img", {
+                src: url,
+                alt: "frame " + (i + 1),
+                referrerPolicy: "no-referrer",
+                loading: i < 4 ? "eager" : "lazy",
+                onError: () => onImgError(i),
+                style: { width: "100%", height: "100%", objectFit: "cover" },
+              }),
+          h("span", { style: { position: "absolute", top: 2, left: 2, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 9, padding: "1px 4px", borderRadius: 3 } }, "#" + (i+1)),
+        )
+      ),
+    ),
+    list.length > 12 && h("div", { className: "hint", style: { marginBottom: 4 } }, "+" + (list.length - 12) + " more (showing first 12)"),
+    h("button", { className: "secondary", onClick: onCopy, style: { width: "100%", marginTop: 4 } },
+      copied ? ("✓ " + list.length + " frames copied to clipboard") : ("Copy " + list.length + " keyframes as image")),
   );
 }
 
@@ -1614,7 +1631,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.2")),
     );
   }
   if (corpusError) {
@@ -1625,7 +1642,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.2")),
     );
   }
   if (!corpus) return null;
@@ -1810,7 +1827,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.1.1"),
+      "build V3.1.2"),
   );
 
   // ---- Views ----
@@ -1955,9 +1972,9 @@ function CaseView({
       ),
     ),
 
-    // Keyframes info section (V3.1.1 — no URL image rendering)
+    // Keyframes preview grid (V3.1.2 — attachment thumbnails + copy)
     urls.length > 0 && h(Section, { title: "Keyframes", defaultOpen: true, badge: urls.length },
-      h(KeyframesInfo, { count: urls.length, onCopy: onCopyKeyframes, copied: keyframesCopied }),
+      h(KeyframesPreview, { urls: urls, onCopy: onCopyKeyframes, copied: keyframesCopied }),
     ),
 
     // Result sections — only after Run
@@ -2044,7 +2061,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.1.1"); };
+  const copyStamp = () => { safeCopy("V3.1.2"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2053,7 +2070,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.1")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.2")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
