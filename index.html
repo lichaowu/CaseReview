@@ -2003,7 +2003,6 @@ function CaseView({
             reasoningCopied ? "✓ JSON copied" : "1. Copy JSON"),
           h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length },
             keyframesCopied ? ("✓ " + urls.length + " frames copied") : ("2. Copy keyframes (" + urls.length + ")")),
-          payloadJson && h("button", { className: "secondary tiny", onClick: () => { safeCopy(payloadJson); } }, "Re-copy JSON"),
         ),
         payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
           payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION + (urls.length ? " · paste JSON first, then paste keyframes" : "")),
