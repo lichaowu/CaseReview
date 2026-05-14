@@ -770,7 +770,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
-  try { console.log("[CaseReview] V3.1.2 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
+  try { console.log("[CaseReview] V3.2.0 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -784,7 +784,7 @@ async function loadCorpusFromBitable() {
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
       _keyframeTokens: (function(){
-        // V3.1.2: Read attachment tokens from "keyframes" field.
+        // V3.2.0: Read attachment tokens from "keyframes" field.
         // Actual URLs resolved async after load via table.getAttachmentUrl()
         var att = readCell(f, pendingIdx, "keyframes");
         if (Array.isArray(att) && att.length) {
@@ -797,7 +797,7 @@ async function loadCorpusFromBitable() {
     };
   }).filter(p => p.source_video_id);
 
-  // V3.1.2: Attachment URL resolution is deferred to after first render.
+  // V3.2.0: Attachment URL resolution is deferred to after first render.
   // Store table reference for lazy resolution in the component.
   const _pendingTblRef = pendingTbl;
   const _pendingIdxRef = pendingIdx;
@@ -1211,6 +1211,153 @@ function tryParseReasonedJson(raw) {
   }
 }
 
+// ---------- V3.2.0: Normalize different skill verdict schemas into a common shape ----------
+function normalizeVerdict(raw) {
+  if (!raw) return raw;
+  var v = Object.assign({}, raw);
+
+  // CoT tag parser: splits a tagged reason string into reasoning.* fields
+  function _parseCoTTags(reason) {
+    if (!reason || typeof reason !== "string") return {};
+    var tags = ["RECALL CONTEXT","VISUAL ANALYSIS","TEXT ANALYSIS","PRECEDENT TRIAGE",
+                "FIRST PASS","SECOND PASS","VERDICT","SYNTHESIS","CONTEXT EVALUATION",
+                "FICTION/CONTEXT PRE-CHECK","POLICY MATCH","CONTEXT CHECK"];
+    var fieldMap = {
+      "RECALL CONTEXT":"recall_context","VISUAL ANALYSIS":"visual_analysis","TEXT ANALYSIS":"text_analysis",
+      "PRECEDENT TRIAGE":"precedent_triage","FIRST PASS":"first_pass","SECOND PASS":"second_pass",
+      "VERDICT":"verdict","SYNTHESIS":"synthesis","CONTEXT EVALUATION":"context_evaluation",
+      "FICTION/CONTEXT PRE-CHECK":"fiction_precheck","POLICY MATCH":"policy_match","CONTEXT CHECK":"context_check"
+    };
+    var escaped = tags.map(function(t){ return t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); });
+    var boundary = "\\[(?:" + escaped.join("|") + ")\\]";
+    var out = {};
+    tags.forEach(function(tag, idx){
+      var re = new RegExp("\\[" + escaped[idx] + "\\]\\s*([\\s\\S]*?)(?=" + boundary + "|$)");
+      var m = reason.match(re);
+      if (m && m[1] && m[1].trim()) out[fieldMap[tag]] = m[1].trim();
+    });
+    return out;
+  }
+
+  // Path A: Unified schema (conclusion + reason string with CoT tags)
+  if (v.conclusion && typeof v.reason === "string") {
+    v.draft_decision = v.conclusion;
+    if (v.confidence == null) v.confidence = 5;
+    if (v.grey == null) v.grey = v.confidence <= 4;
+    if (!v.vertical) v.vertical = v.policy_area || "";
+    if (!v.pattern) v.pattern = "";
+    if (!v.exemptions_applied) v.exemptions_applied = [];
+    if (!v.secondary_titles) v.secondary_titles = [];
+    if (!v.precedent_analysis) v.precedent_analysis = [];
+    if (!v.watch_outs) v.watch_outs = [];
+    v.reasoning = _parseCoTTags(v.reason);
+    return v;
+  }
+
+  // Path B: Legacy NSA Mira skill (draft_decision + reasoning object with .verdict)
+  if (v.draft_decision && v.reasoning && typeof v.reasoning === "object" && v.reasoning.verdict) {
+    v.conclusion = v.draft_decision;
+    if (v.confidence == null) v.confidence = 5;
+    if (v.grey == null) v.grey = v.confidence <= 4;
+    if (!v.vertical) v.vertical = "NSA";
+    if (!v.pattern) v.pattern = "";
+    if (!v.exemptions_applied) v.exemptions_applied = [];
+    if (!v.secondary_titles) v.secondary_titles = [];
+    var parts = [];
+    if (v.reasoning.visual_analysis) parts.push("[VISUAL ANALYSIS] " + v.reasoning.visual_analysis);
+    if (v.reasoning.text_analysis) parts.push("[TEXT ANALYSIS] " + v.reasoning.text_analysis);
+    if (v.reasoning.first_pass) parts.push("[FIRST PASS] " + v.reasoning.first_pass);
+    if (v.reasoning.second_pass) parts.push("[SECOND PASS] " + v.reasoning.second_pass);
+    if (v.reasoning.verdict) parts.push("[VERDICT] " + v.reasoning.verdict);
+    v.reason = parts.join(" ");
+    return v;
+  }
+
+  // Path C: Legacy HRA Mira skill (verdict.decision + first_pass/second_pass objects)
+  if (!v.conclusion && !v.draft_decision && v.verdict && v.verdict.decision) {
+    v.conclusion = v.verdict.decision === "ALLOW" ? "PASS" : v.verdict.decision;
+    v.draft_decision = v.conclusion;
+    if (v.verdict.confidence != null) {
+      v.confidence = v.verdict.confidence <= 1 ? Math.round(v.verdict.confidence * 10) : v.verdict.confidence;
+    }
+    if (v.confidence == null) v.confidence = 5;
+    if (v.grey == null) v.grey = v.confidence <= 4;
+    if (v.verdict.confidence_label) v.confidence_label = v.verdict.confidence_label;
+    if (v.verdict.rule_applied) v.applied_rule = v.verdict.rule_applied;
+    if (v.verdict.policy_notes) v.rule_rationale = v.verdict.policy_notes;
+    v.policy_title = v.policy_title || v.verdict.policy_title || v.policy_area || "";
+    if (!v.vertical) v.vertical = v.policy_area || "";
+    if (!v.pattern) v.pattern = "";
+    if (!v.exemptions_applied) v.exemptions_applied = [];
+    if (!v.secondary_titles) v.secondary_titles = [];
+    if (!v.watch_outs && v.verdict.rejection_reasons) {
+      v.watch_outs = Object.entries(v.verdict.rejection_reasons).map(function(e){ return e[0] + ": " + e[1]; });
+    }
+    if (!v.reasoning) v.reasoning = {};
+    if (v.verdict.reasoning) v.reasoning.verdict = v.verdict.reasoning;
+    if (v.first_pass && !v.reasoning.first_pass) {
+      var fp = v.first_pass;
+      v.reasoning.first_pass = (fp.initial_assessment || "") +
+        (Array.isArray(fp.candidate_signals) ? "\nSignals: " + fp.candidate_signals.join(", ") : "");
+    }
+    if (v.second_pass) {
+      var sp = v.second_pass;
+      if (sp.prosecutor_pass && !v.reasoning.first_pass) {
+        v.reasoning.first_pass = sp.prosecutor_pass.strongest_violation_argument || "";
+      }
+      if (sp.defense_pass && !v.reasoning.second_pass) {
+        v.reasoning.second_pass = sp.defense_pass.strongest_allow_argument || "";
+      }
+      if (sp.precedent_cross_check && !v.reasoning.visual_analysis) {
+        v.reasoning.visual_analysis = sp.precedent_cross_check;
+      }
+      if (Array.isArray(sp.precedent_analysis) && (!v.precedent_analysis || !v.precedent_analysis.length)) {
+        v.precedent_analysis = sp.precedent_analysis.map(function(pa) {
+          return {
+            case_id: pa.precedent_id || pa.case_id || "",
+            applicability: pa.relevance === "MODERATE" ? "PARTIAL" :
+                           pa.relevance === "NONE" ? "NON-APPLICABLE" :
+                           pa.relevance === "HIGH" ? "APPLICABLE" : "NON-APPLICABLE",
+            shared_signals: [], conflicting_signals: [],
+            decision_alignment: pa.decision === "FLAG" ? "supports FLAG" : pa.decision === "PASS" ? "supports PASS" : "not informative",
+            note: pa.reasoning || ""
+          };
+        });
+      }
+    }
+    if (!v.severity && v.verdict && v.verdict.severity) v.severity = v.verdict.severity;
+    var rparts = [];
+    if (v.reasoning.visual_analysis) rparts.push("[VISUAL ANALYSIS] " + v.reasoning.visual_analysis);
+    if (v.reasoning.first_pass) rparts.push("[FIRST PASS] " + v.reasoning.first_pass);
+    if (v.reasoning.second_pass) rparts.push("[SECOND PASS] " + v.reasoning.second_pass);
+    if (v.reasoning.verdict) rparts.push("[VERDICT] " + v.reasoning.verdict);
+    v.reason = rparts.join(" ");
+    return v;
+  }
+
+  // Path D: Eval pipeline (conclusion already set, reason string)
+  if (v.conclusion) {
+    v.draft_decision = v.conclusion;
+    if (v.confidence == null) v.confidence = 5;
+    if (v.grey == null) v.grey = v.confidence <= 4;
+    v.reasoning = _parseCoTTags(typeof v.reason === "string" ? v.reason : "");
+    return v;
+  }
+
+  // Path E: Legacy NSA without reasoning.verdict (just draft_decision)
+  if (v.draft_decision) {
+    v.conclusion = v.draft_decision;
+    if (!v.reasoning) v.reasoning = {};
+    if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
+    return v;
+  }
+
+  // Fallback
+  if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
+  if (!v.reasoning) v.reasoning = {};
+  return v;
+}
+
 // ---------- V2.7.0: in-memory log ring buffer (for Diagnostics view) ----------
 const LOG_RING_CAP = 200;
 const LOG_RING = [];
@@ -1274,7 +1421,7 @@ async function safeCopy(text) {
   }
 }
 window.__safeCopy = safeCopy;
-// ---------- V3.1.2: Copy keyframes as composite image to clipboard ----------
+// ---------- V3.2.0: Copy keyframes as composite image to clipboard ----------
 async function copyKeyframesToClipboard(urls) {
   if (!urls || !urls.length) return false;
   try {
@@ -1356,7 +1503,7 @@ function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
 }
 
-// ---------- KeyframesPreview (V3.1.2 — thumbnail grid from attachment URLs + copy) ----------
+// ---------- KeyframesPreview (V3.2.0 — thumbnail grid from attachment URLs + copy) ----------
 function KeyframesPreview({ urls, onCopy, copied }) {
   const [errors, setErrors] = useState({});
   const list = Array.isArray(urls) ? urls : [];
@@ -1492,10 +1639,11 @@ function _gapDots(gap) {
   );
 }
 
-function ReasonedVerdict({ v }) {
-  if (!v) return null;
-  const dec = (v.draft_decision || "").toUpperCase();
-  const decKind = dec === "FLAG" ? "flag" : dec === "PASS" ? "pass" : "sim";
+function ReasonedVerdict({ v: rawV }) {
+  if (!rawV) return null;
+  const v = normalizeVerdict(rawV);
+  const dec = (v.conclusion || v.draft_decision || "").toUpperCase();
+  const decKind = dec === "FLAG" ? "flag" : (dec === "PASS" || dec === "ALLOW") ? "pass" : dec === "ESCALATE" ? "sim" : "sim";
   const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
   // V3.0: derive legacy boolean if not provided
   const gap = v.policy_gap && typeof v.policy_gap === "object" ? v.policy_gap : null;
@@ -1619,7 +1767,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.2")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.2.0")),
     );
   }
   if (corpusError) {
@@ -1630,7 +1778,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.2")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.2.0")),
     );
   }
   if (!corpus) return null;
@@ -1710,7 +1858,7 @@ function MainApp({ corpus, onReloadCorpus }) {
     setShowHandoff(false);
     setKeyframesCopied(false);
     setView("case");
-    // V3.1.2: Lazy-resolve attachment URLs if not already resolved
+    // V3.2.0: Lazy-resolve attachment URLs if not already resolved
     if (!initialUrls.length && p._keyframeTokens && p._keyframeTokens.length && window.__resolveKeyframeUrls) {
       window.__resolveKeyframeUrls(p).then(function(resolved) {
         if (resolved && resolved.length) {
@@ -1825,7 +1973,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.1.2"),
+      "build V3.2.0"),
   );
 
   // ---- Views ----
@@ -1970,7 +2118,7 @@ function CaseView({
       ),
     ),
 
-    // Keyframes preview grid (V3.1.2 — attachment thumbnails + copy)
+    // Keyframes preview grid (V3.2.0 — attachment thumbnails + copy)
     urls.length > 0 && h(Section, { title: "Keyframes", defaultOpen: true, badge: urls.length },
       h(KeyframesPreview, { urls: urls, onCopy: onCopyKeyframes, copied: keyframesCopied }),
     ),
@@ -2009,7 +2157,7 @@ function CaseView({
         h("label", null, "Paste Mira's JSON reply"),
         h("textarea", {
           rows: 6, value: reasonedRaw,
-          placeholder: '{"draft_decision":"...", "confidence":7, ...}',
+          placeholder: 'Paste Mira verdict JSON here (any specialist schema supported)...',
           onChange: e => setReasonedRaw(e.target.value),
           style: { fontFamily: "var(--mono)", fontSize: "var(--fs-mono)" },
         }),
@@ -2058,7 +2206,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.1.2"); };
+  const copyStamp = () => { safeCopy("V3.2.0"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2067,7 +2215,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.2")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.2.0")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
