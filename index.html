@@ -797,34 +797,52 @@ async function loadCorpusFromBitable() {
     };
   }).filter(p => p.source_video_id);
 
-  // V3.1.2: Resolve attachment tokens to URLs via Bitable SDK
-  if (pendingTbl) {
-    const keyframesFieldId = pendingIdx && pendingIdx.byName && pendingIdx.byName["keyframes"];
-    if (keyframesFieldId) {
-      try {
-        const field = await pendingTbl.getFieldById(keyframesFieldId);
-        // getAttachmentUrls returns [{token, url}...] for a given record
-        await Promise.all(pending.map(async (p) => {
-          if (!p._keyframeTokens || !p._keyframeTokens.length) return;
-          try {
-            const urls = await field.getAttachmentUrls(p._recordId);
-            if (Array.isArray(urls) && urls.length) {
-              p.image_urls = urls.map(u => (typeof u === "string") ? u : (u && u.url || "")).filter(Boolean);
-            }
-            if (p.image_urls.length) {
-              try { console.log("[CaseReview] keyframes resolved for", p.source_video_id, ":", p.image_urls.length, "URLs"); } catch(_){}
-            }
-          } catch (e) {
-            try { console.warn("[CaseReview] getAttachmentUrls failed for", p.source_video_id, e && e.message); } catch(_){}
-          }
-        }));
-      } catch (e) {
-        try { console.warn("[CaseReview] keyframes field resolution failed:", e && e.message); } catch(_){}
+  // V3.1.2: Attachment URL resolution is deferred to after first render.
+  // Store table reference for lazy resolution in the component.
+  const _pendingTblRef = pendingTbl;
+  const _pendingIdxRef = pendingIdx;
+
+  // Helper: resolve attachment URLs for a single pending record (called lazily)
+  async function resolveKeyframeUrls(p) {
+    if (p.image_urls && p.image_urls.length) return p.image_urls; // already resolved
+    if (!p._keyframeTokens || !p._keyframeTokens.length || !_pendingTblRef) return [];
+    const fieldId = _pendingIdxRef && _pendingIdxRef.byName && _pendingIdxRef.byName["keyframes"];
+    if (!fieldId) return [];
+    try {
+      const field = await _pendingTblRef.getFieldById(fieldId);
+      // Try multiple SDK methods for getting attachment URLs
+      let urls = [];
+      if (typeof field.getAttachmentUrls === "function") {
+        const result = await Promise.race([
+          field.getAttachmentUrls(p._recordId),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))
+        ]);
+        if (Array.isArray(result)) urls = result.map(u => (typeof u === "string") ? u : (u && u.url || "")).filter(Boolean);
       }
-    } else {
-      try { console.warn("[CaseReview] keyframes fieldId not found in pendingIdx"); } catch(_){}
+      if (!urls.length && typeof field.getTmpUrls === "function") {
+        const result = await Promise.race([
+          field.getTmpUrls(p._keyframeTokens.map(t => t.token)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))
+        ]);
+        if (Array.isArray(result)) urls = result.map(u => (typeof u === "string") ? u : (u && u.tmpUrl || u && u.url || "")).filter(Boolean);
+      }
+      if (!urls.length) {
+        // Last resort: construct URLs from tokens using known Bitable pattern
+        urls = p._keyframeTokens
+          .map(t => t.tmp_url || t.tmpUrl || t.url || "")
+          .filter(u => /^https?:\/\//i.test(u));
+      }
+      if (urls.length) {
+        p.image_urls = urls;
+        try { console.log("[CaseReview] keyframes resolved for", p.source_video_id, ":", urls.length, "URLs"); } catch(_){}
+      }
+      return urls;
+    } catch (e) {
+      try { console.warn("[CaseReview] resolveKeyframeUrls failed for", p.source_video_id, ":", e && e.message); } catch(_){}
+      return [];
     }
   }
+  window.__resolveKeyframeUrls = resolveKeyframeUrls;
 
   // Distinct facets for filter dropdowns
   const issuesSet = new Set();
@@ -1673,13 +1691,14 @@ function MainApp({ corpus, onReloadCorpus }) {
   // ---- Pre-fill from a Pending Cases row ----
   const applyPending = useCallback((p) => {
     if (!p) return;
+    const initialUrls = (p.image_urls && p.image_urls.length) ? p.image_urls : [];
     setInputs({
       item_id: p.source_video_id || "",
       visual_summary: p.visual_summary || "",
       asr_text: p.asr_text || "",
       ocr_text: p.ocr_text || "",
       caption_text: p.caption_text || "",
-      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : [],
+      image_urls: initialUrls,
       issue: p.issue || "",
       title: p.policy_title || "",
       k: 5,
@@ -1689,7 +1708,16 @@ function MainApp({ corpus, onReloadCorpus }) {
     setReasonedRaw(""); setReasonedVerdict(null); setReasonedError("");
     setPayloadJson(""); setReasoningCopied(false);
     setShowHandoff(false);
+    setKeyframesCopied(false);
     setView("case");
+    // V3.1.2: Lazy-resolve attachment URLs if not already resolved
+    if (!initialUrls.length && p._keyframeTokens && p._keyframeTokens.length && window.__resolveKeyframeUrls) {
+      window.__resolveKeyframeUrls(p).then(function(resolved) {
+        if (resolved && resolved.length) {
+          setInputs(function(prev) { return Object.assign({}, prev, { image_urls: resolved }); });
+        }
+      });
+    }
   }, []);
 
   const onPickQueueItem = useCallback((sourceVideoId) => {
