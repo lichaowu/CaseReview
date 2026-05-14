@@ -788,13 +788,13 @@ async function loadCorpusFromBitable() {
         // [{token,name,type,size,url,tmpUrl}, ...] with short-lived signed *.feishu.cn URLs
         // that bypass ibyteimg origin/referer restrictions. Falls back to legacy image_urls
         // text field for un-migrated rows.
-        var att = readCell(f, pendingIdx, "image_attachments");
+        var att = readCell(f, pendingIdx, "keyframes");
         if (Array.isArray(att) && att.length) {
           var attUrls = att
             .map(function(a){ return a && (a.url || a.tmpUrl || a.tmp_url || a.link) || ""; })
             .filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
           if (attUrls.length) {
-            try { console.log("[CaseReview] image_attachments hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
+            try { console.log("[CaseReview] keyframes hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
             return attUrls;
           }
         }
@@ -949,7 +949,7 @@ function score(idx, queryTokens, { issue, title } = {}) {
   const results = [];
   for (const d of docs) {
     if (issue && d.raw.issue !== issue) continue;
-    if (title && d.raw.policy_title !== title) continue;
+    if (title && d.raw.policy_title !== title && !(Array.isArray(d.raw.policy_titles) && d.raw.policy_titles.indexOf(title) !== -1)) continue;
     let s = 0;
     for (const q of queryTokens) {
       const n_q = df.get(q) || 0;
@@ -1153,7 +1153,8 @@ function buildPayload({ inputs, precedents, topRule, companionRules, issue }) {
     caption_text: inputs.caption_text || "",
   };
   if (inputs.image_urls && inputs.image_urls.length) {
-    candidate.image_urls = (Array.isArray(inputs.image_urls) ? inputs.image_urls : []).slice(0, 30);
+    candidate.images_attached_count = inputs.image_urls.length;
+    candidate.images_note = inputs.image_urls.length + " keyframe(s) attached as image(s) in this chat message. Analyze them visually for first_pass/second_pass reasoning.";
   }
   const precs = (precedents || []).map((p, i) => {
     const r = p.raw || {};
@@ -1285,6 +1286,82 @@ async function safeCopy(text) {
   }
 }
 window.__safeCopy = safeCopy;
+// ---------- V3.1.0: Copy keyframes as composite image to clipboard ----------
+async function copyKeyframesToClipboard(urls) {
+  if (!urls || !urls.length) return false;
+  try {
+    // Load all images
+    const imgs = await Promise.all(urls.slice(0, 12).map(url => new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.referrerPolicy = "no-referrer";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    })));
+    const loaded = imgs.filter(Boolean);
+    if (!loaded.length) { console.warn("[CaseReview] No images loaded for composite"); return false; }
+
+    // Layout: 2-column grid
+    const cols = Math.min(2, loaded.length);
+    const rows = Math.ceil(loaded.length / cols);
+    const cellW = 400;
+    const cellH = 300;
+    const gap = 4;
+    const canvasW = cols * cellW + (cols - 1) * gap;
+    const canvasH = rows * cellH + (rows - 1) * gap;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#181715";
+    ctx.fillRect(0, 0, canvasW, canvasH);
+
+    loaded.forEach((img, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = col * (cellW + gap);
+      const y = row * (cellH + gap);
+      // Fit image within cell maintaining aspect ratio
+      const scale = Math.min(cellW / img.naturalWidth, cellH / img.naturalHeight);
+      const dw = img.naturalWidth * scale;
+      const dh = img.naturalHeight * scale;
+      const dx = x + (cellW - dw) / 2;
+      const dy = y + (cellH - dh) / 2;
+      ctx.drawImage(img, dx, dy, dw, dh);
+      // Frame number label
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(x, y, 28, 20);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px Inter, sans-serif";
+      ctx.fillText("#" + (i + 1), x + 4, y + 14);
+    });
+
+    // Try modern clipboard API
+    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+    if (!blob) return false;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({"image/png": blob})]);
+      console.log("[CaseReview] Keyframes composite copied to clipboard (" + loaded.length + " frames)");
+      return true;
+    } catch (clipErr) {
+      // Clipboard API blocked — open in new tab as fallback
+      console.warn("[CaseReview] Clipboard image write blocked, opening in tab:", clipErr.message);
+      const dataUrl = canvas.toDataURL("image/png");
+      const w = window.open("");
+      if (w) {
+        w.document.write("<title>Keyframes — copy this image</title><body style=\"margin:0;background:#181715\"><img src=\"" + dataUrl + "\" style=\"max-width:100%\"><p style=\"color:#fff;font:13px sans-serif;padding:8px\">Right-click → Copy image, then paste into Mira chat.</p></body>");
+      }
+      return false;
+    }
+  } catch (e) {
+    console.error("[CaseReview] copyKeyframesToClipboard error:", e);
+    return false;
+  }
+}
+window.__copyKeyframes = copyKeyframesToClipboard;
+
 
 // ---------- Components ----------
 function Tag({ kind, children }) {
@@ -1361,7 +1438,7 @@ function ConsistencyBanner({ precedents }) {
     "⚠ Mixed — " + flags + " FLAG / " + passes + " PASS in top-" + precedents.length + ". Grey case.");
 }
 
-function DraftDecision({ precedents, topRule }) {
+) {
   if (!precedents.length) {
     return h("div", { className: "decision-box" },
       h("h4", null, "Draft decision"),
@@ -1596,7 +1673,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.0.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.1.0")),
     );
   }
   if (corpusError) {
@@ -1607,7 +1684,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.0.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.1.0")),
     );
   }
   if (!corpus) return null;
@@ -1638,6 +1715,7 @@ function MainApp({ corpus, onReloadCorpus }) {
   const [loading, setLoading] = useState(false);
   const [payloadJson, setPayloadJson] = useState("");
   const [reasoningCopied, setReasoningCopied] = useState(false);
+  const [keyframesCopied, setKeyframesCopied] = useState(false);
   const [reasonedRaw, setReasonedRaw] = useState("");
   const [reasonedVerdict, setReasonedVerdict] = useState(null);
   const [reasonedError, setReasonedError] = useState("");
@@ -1749,6 +1827,13 @@ function MainApp({ corpus, onReloadCorpus }) {
     safeCopy(txt).then(ok => setReasoningCopied(!!ok));
   }, [result, inputs]);
 
+  const onCopyKeyframes = useCallback(() => {
+    const imgUrls = Array.isArray(inputs.image_urls) ? inputs.image_urls : [];
+    if (!imgUrls.length) return;
+    setKeyframesCopied(false);
+    copyKeyframesToClipboard(imgUrls).then(ok => setKeyframesCopied(!!ok));
+  }, [inputs.image_urls]);
+
   const onParseReply = useCallback(() => {
     setReasonedError("");
     const parsed = tryParseReasonedJson(reasonedRaw);
@@ -1784,7 +1869,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.0.0"),
+      "build V3.1.0"),
   );
 
   // ---- Views ----
@@ -1818,6 +1903,7 @@ function MainApp({ corpus, onReloadCorpus }) {
         result, loading, onRun,
         facets, titleOptions,
         onBuildPayload, payloadJson, reasoningCopied,
+        keyframesCopied, onCopyKeyframes,
         reasonedRaw, setReasonedRaw, reasonedVerdict, reasonedError, onParseReply,
         showHandoff, setShowHandoff,
       }),
@@ -1886,6 +1972,7 @@ function CaseView({
   result, loading, onRun,
   facets, titleOptions,
   onBuildPayload, payloadJson, reasoningCopied,
+  keyframesCopied, onCopyKeyframes,
   reasonedRaw, setReasonedRaw, reasonedVerdict, reasonedError, onParseReply,
   showHandoff, setShowHandoff,
 }) {
@@ -1938,10 +2025,7 @@ function CaseView({
 
     // Result sections — only after Run
     result && h(React.Fragment, null,
-      h(Section, { title: "Draft decision", defaultOpen: true },
-        h(ConsistencyBanner, { precedents: result.precedents }),
-        h(DraftDecision, { precedents: result.precedents, topRule: result.topRule }),
-      ),
+      h(ConsistencyBanner, { precedents: result.precedents }),
 
       h(Section, { title: "Top precedents", defaultOpen: false, badge: result.precedents.length },
         result.precedents.length === 0
@@ -1961,14 +2045,16 @@ function CaseView({
       // Mira hand-off (collapsed by default)
       h(Section, { title: "Send to Mira reviewer", defaultOpen: showHandoff },
         h("div", { className: "hint", style: { marginBottom: 8 } },
-          "Build a JSON payload (candidate + precedents + top rule), copy into Mira chat, paste reply below."),
-        h("div", { className: "row tight", style: { marginBottom: 8 } },
+          "Copy payload JSON + keyframe images into Mira chat (two pastes), then paste the reply below."),
+        h("div", { className: "row tight", style: { marginBottom: 8, flexWrap: "wrap", gap: "6px" } },
           h("button", { className: "secondary", onClick: onBuildPayload },
-            reasoningCopied ? "✓ Copied" : "Build & copy"),
-          payloadJson && h("button", { className: "secondary tiny", onClick: () => { safeCopy(payloadJson); } }, "Copy again"),
+            reasoningCopied ? "✓ JSON copied" : "1. Copy JSON"),
+          h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length },
+            keyframesCopied ? ("✓ " + urls.length + " frames copied") : ("2. Copy keyframes (" + urls.length + ")")),
+          payloadJson && h("button", { className: "secondary tiny", onClick: () => { safeCopy(payloadJson); } }, "Re-copy JSON"),
         ),
         payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
-          payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION),
+          payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION + (urls.length ? " · paste JSON first, then paste keyframes" : "")),
         h("label", null, "Paste Mira's JSON reply"),
         h("textarea", {
           rows: 6, value: reasonedRaw,
@@ -2021,7 +2107,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.0.0"); };
+  const copyStamp = () => { safeCopy("V3.1.0"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2030,7 +2116,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.0.0")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.1.0")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
