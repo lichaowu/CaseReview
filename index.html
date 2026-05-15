@@ -1212,15 +1212,45 @@ function tryParseReasonedJson(raw) {
 }
 
 // ---------- V3.2.0: Normalize different skill verdict schemas into a common shape ----------
+// V3.2.2: Safety net — recursively coerce any object values to strings before React render.
+// React 18 throws Error #31 when passed plain objects as children.
+function _sanitizeForReact(v) {
+  if (!v || typeof v !== "object") return v;
+  // Coerce applied_rule from object to string
+  if (v.applied_rule && typeof v.applied_rule === "object") {
+    if (!v.rule_rationale && v.applied_rule.rule_type) v.rule_rationale = String(v.applied_rule.rule_type);
+    v.applied_rule = String(v.applied_rule.rule_name || JSON.stringify(v.applied_rule));
+  }
+  // Coerce scalar display fields that must be strings
+  ["conclusion","draft_decision","policy_title","vertical","severity","pattern",
+   "rule_rationale","next_step","applied_rule","reason"].forEach(function(k) {
+    if (v[k] != null && typeof v[k] === "object" && !Array.isArray(v[k])) v[k] = JSON.stringify(v[k]);
+  });
+  // Sanitize precedent_analysis items
+  if (Array.isArray(v.precedent_analysis)) {
+    v.precedent_analysis = v.precedent_analysis.map(function(pa) {
+      if (!pa || typeof pa !== "object") return pa;
+      var safe = Object.assign({}, pa);
+      ["case_id","applicability","decision_alignment","note"].forEach(function(k) {
+        if (safe[k] != null && typeof safe[k] === "object") safe[k] = JSON.stringify(safe[k]);
+      });
+      if (Array.isArray(safe.shared_signals)) safe.shared_signals = safe.shared_signals.map(String);
+      if (Array.isArray(safe.conflicting_signals)) safe.conflicting_signals = safe.conflicting_signals.map(String);
+      return safe;
+    });
+  }
+  // Sanitize watch_outs
+  if (Array.isArray(v.watch_outs)) v.watch_outs = v.watch_outs.map(function(w) {
+    return (w != null && typeof w === "object") ? JSON.stringify(w) : w;
+  });
+  return v;
+}
+
 function normalizeVerdict(raw) {
   if (!raw) return raw;
   var v = Object.assign({}, raw);
 
-  // V3.2.1: Coerce applied_rule from object to display string (prevents React Error #31)
-  if (v.applied_rule && typeof v.applied_rule === "object") {
-    if (!v.rule_rationale && v.applied_rule.rule_type) v.rule_rationale = v.applied_rule.rule_type;
-    v.applied_rule = v.applied_rule.rule_name || JSON.stringify(v.applied_rule);
-  }
+  // V3.2.2: Object safety handled by _sanitizeForReact at return sites
 
   // CoT tag parser: splits a tagged reason string into reasoning.* fields
   function _parseCoTTags(reason) {
@@ -1257,12 +1287,8 @@ function normalizeVerdict(raw) {
     if (!v.precedent_analysis) v.precedent_analysis = [];
     if (!v.watch_outs) v.watch_outs = [];
     v.reasoning = _parseCoTTags(v.reason);
-    // V3.2.1: Normalize applied_rule from object to string for rendering
-    if (v.applied_rule && typeof v.applied_rule === "object") {
-      v.rule_rationale = v.applied_rule.rule_type || v.applied_rule.rule_version || "";
-      v.applied_rule = v.applied_rule.rule_name || JSON.stringify(v.applied_rule);
-    }
-    return v;
+    // V3.2.2: applied_rule coercion now handled by _sanitizeForReact
+    return _sanitizeForReact(v);
   }
 
   // Path B: Legacy NSA Mira skill (draft_decision + reasoning object with .verdict)
@@ -1281,7 +1307,7 @@ function normalizeVerdict(raw) {
     if (v.reasoning.second_pass) parts.push("[SECOND PASS] " + v.reasoning.second_pass);
     if (v.reasoning.verdict) parts.push("[VERDICT] " + v.reasoning.verdict);
     v.reason = parts.join(" ");
-    return v;
+    return _sanitizeForReact(v);
   }
 
   // Path C: Legacy HRA Mira skill (verdict.decision + first_pass/second_pass objects)
@@ -1343,7 +1369,7 @@ function normalizeVerdict(raw) {
     if (v.reasoning.second_pass) rparts.push("[SECOND PASS] " + v.reasoning.second_pass);
     if (v.reasoning.verdict) rparts.push("[VERDICT] " + v.reasoning.verdict);
     v.reason = rparts.join(" ");
-    return v;
+    return _sanitizeForReact(v);
   }
 
   // Path D: Eval pipeline (conclusion already set, reason string)
@@ -1352,7 +1378,7 @@ function normalizeVerdict(raw) {
     if (v.confidence == null) v.confidence = 5;
     if (v.grey == null) v.grey = v.confidence <= 4;
     v.reasoning = _parseCoTTags(typeof v.reason === "string" ? v.reason : "");
-    return v;
+    return _sanitizeForReact(v);
   }
 
   // Path E: Legacy NSA without reasoning.verdict (just draft_decision)
@@ -1360,13 +1386,13 @@ function normalizeVerdict(raw) {
     v.conclusion = v.draft_decision;
     if (!v.reasoning) v.reasoning = {};
     if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
-    return v;
+    return _sanitizeForReact(v);
   }
 
   // Fallback
   if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
   if (!v.reasoning) v.reasoning = {};
-  return v;
+  return _sanitizeForReact(v);
 }
 
 // ---------- V2.7.0: in-memory log ring buffer (for Diagnostics view) ----------
@@ -1706,9 +1732,38 @@ function _gapDots(gap) {
   );
 }
 
+// V3.2.2: Error boundary for verdict rendering — catches React render errors gracefully
+class VerdictErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) {
+    try { console.error("[CaseReview] Verdict render error:", error, info); } catch(_){}
+  }
+  render() {
+    if (this.state.error) {
+      return h("div", { className: "banner no-match", style: { margin: "8px 0" } },
+        h("div", { style: { fontWeight: 500, marginBottom: 4 } }, "Verdict render error"),
+        h("div", { style: { fontSize: "12px" } }, String(this.state.error && this.state.error.message || this.state.error)),
+        h("button", { className: "secondary tiny", style: { marginTop: 6 },
+          onClick: () => this.setState({ error: null }) }, "Retry"));
+    }
+    return this.props.children;
+  }
+}
+
 function ReasonedVerdict({ v: rawV }) {
   if (!rawV) return null;
-  const v = normalizeVerdict(rawV);
+  var v;
+  try { v = normalizeVerdict(rawV); } catch(e) {
+    return h("div", { className: "banner no-match" }, "Verdict parse error: " + (e && e.message || e));
+  }
+  try { return _ReasonedVerdictInner(v); } catch(e) {
+    return h("div", { className: "banner no-match" },
+      h("div", null, "Render error: " + (e && e.message || e)),
+      h("pre", { style: { fontSize: "11px", marginTop: 6 } }, JSON.stringify(rawV, null, 2).slice(0, 500)));
+  }
+}
+function _ReasonedVerdictInner(v) {
   const dec = (v.conclusion || v.draft_decision || "").toUpperCase();
   const decKind = dec === "FLAG" ? "flag" : (dec === "PASS" || dec === "ALLOW") ? "pass" : dec === "ESCALATE" ? "sim" : "sim";
   const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
@@ -2236,7 +2291,7 @@ function CaseView({
         reasonedError && h("div", { style: { color: "var(--error)", fontSize: "var(--fs-meta)", marginTop: 6 } }, reasonedError),
       ),
 
-      reasonedVerdict && h(ReasonedVerdict, { v: reasonedVerdict }),
+      reasonedVerdict && h(VerdictErrorBoundary, null, h(ReasonedVerdict, { v: reasonedVerdict })),
     ),
 
     !result && h("div", { className: "hint", style: { padding: "10px 4px" } },
