@@ -157,7 +157,7 @@
     padding: 7px 10px;
     border: 1px solid var(--hairline);
     border-radius: 6px;
-    background: #fff;
+    background: var(--canvas);
     color: var(--ink);
     font: 400 var(--fs-base)/var(--lh) var(--sans);
     transition: border-color .15s ease, box-shadow .15s ease;
@@ -165,7 +165,7 @@
   input[type=text]:focus, textarea:focus, select:focus {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(204,120,92,0.15);
+    box-shadow: 0 0 0 3px rgba(204,120,92,0.15);
   }
   textarea { resize: vertical; min-height: 48px; font-family: var(--sans); }
 
@@ -181,7 +181,7 @@
     border-radius: 6px;
     padding: 8px 14px;
     height: 34px;
-    font: 500 var(--fs-base)/1 var(--sans);
+    font: 500 14px/1 var(--sans);
     cursor: pointer;
     transition: background .15s ease, transform .05s ease;
     white-space: nowrap;
@@ -198,7 +198,7 @@
     border-color: var(--muted-soft);
   }
   button.tiny {
-    height: 26px; padding: 0 8px;
+    height: 28px; padding: 0 8px;
     font-size: var(--fs-mono);
     border-radius: 4px;
   }
@@ -287,7 +287,7 @@
   }
   .carousel .car-btn {
     pointer-events: auto;
-    width: 28px; height: 28px; padding: 0;
+    width: 32px; height: 32px; padding: 0;
     border-radius: 9999px;
     background: rgba(20,20,19,0.55);
     color: #fff;
@@ -331,7 +331,7 @@
   /* ---- Tags / Badges ---- */
   .tag {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 9999px;
     font-size: var(--fs-mono);
     font-weight: 500;
@@ -418,7 +418,7 @@
   /* ---- Banners ---- */
   .banner {
     padding: 8px 12px;
-    border-radius: 6px;
+    border-radius: 8px;
     margin-bottom: 10px;
     font-weight: 500;
     font-size: var(--fs-meta);
@@ -2202,10 +2202,10 @@ function CaseView({
       h(Section, { title: "Send to Mira reviewer", defaultOpen: showHandoff },
         h("div", { className: "hint", style: { marginBottom: 8 } },
           "Copy payload JSON + keyframe images into Mira chat (two pastes), then paste the reply below."),
-        h("div", { className: "row tight", style: { marginBottom: 8, flexWrap: "wrap", gap: "6px" } },
-          h("button", { className: "secondary", onClick: onBuildPayload },
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: 8 } },
+          h("button", { className: "secondary", onClick: onBuildPayload, style: { flex: "0 0 auto" } },
             reasoningCopied ? "✓ JSON copied" : "1. Copy JSON"),
-          h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length },
+          h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length, style: { flex: "0 0 auto" } },
             keyframesCopied ? ("✓ " + urls.length + " frames copied") : ("2. Copy keyframes (" + urls.length + ")")),
         ),
         payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
@@ -2217,9 +2217,9 @@ function CaseView({
           onChange: e => setReasonedRaw(e.target.value),
           style: { fontFamily: "var(--mono)", fontSize: "var(--fs-mono)" },
         }),
-        h("div", { className: "row tight", style: { marginTop: 6 } },
-          h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim(), className: "secondary" }, "Render verdict"),
-          reasonedRaw && h("button", { className: "secondary tiny",
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: 6 } },
+          h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim(), className: "secondary", style: { flex: "0 0 auto" } }, "Render verdict"),
+          reasonedRaw && h("button", { className: "secondary tiny", style: { flex: "0 0 auto" },
             onClick: () => { setReasonedRaw(""); } }, "Clear"),
         ),
         reasonedError && h("div", { style: { color: "var(--error)", fontSize: "var(--fs-meta)", marginTop: 6 } }, reasonedError),
