@@ -157,7 +157,7 @@
     padding: 7px 10px;
     border: 1px solid var(--hairline);
     border-radius: 6px;
-    background: var(--canvas);
+    background: #fff;
     color: var(--ink);
     font: 400 var(--fs-base)/var(--lh) var(--sans);
     transition: border-color .15s ease, box-shadow .15s ease;
@@ -165,7 +165,7 @@
   input[type=text]:focus, textarea:focus, select:focus {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(204,120,92,0.15);
+    box-shadow: 0 0 0 2px rgba(204,120,92,0.15);
   }
   textarea { resize: vertical; min-height: 48px; font-family: var(--sans); }
 
@@ -181,7 +181,7 @@
     border-radius: 6px;
     padding: 8px 14px;
     height: 34px;
-    font: 500 14px/1 var(--sans);
+    font: 500 var(--fs-base)/1 var(--sans);
     cursor: pointer;
     transition: background .15s ease, transform .05s ease;
     white-space: nowrap;
@@ -198,7 +198,7 @@
     border-color: var(--muted-soft);
   }
   button.tiny {
-    height: 28px; padding: 0 8px;
+    height: 26px; padding: 0 8px;
     font-size: var(--fs-mono);
     border-radius: 4px;
   }
@@ -287,7 +287,7 @@
   }
   .carousel .car-btn {
     pointer-events: auto;
-    width: 32px; height: 32px; padding: 0;
+    width: 28px; height: 28px; padding: 0;
     border-radius: 9999px;
     background: rgba(20,20,19,0.55);
     color: #fff;
@@ -331,7 +331,7 @@
   /* ---- Tags / Badges ---- */
   .tag {
     display: inline-block;
-    padding: 3px 10px;
+    padding: 2px 8px;
     border-radius: 9999px;
     font-size: var(--fs-mono);
     font-weight: 500;
@@ -418,7 +418,7 @@
   /* ---- Banners ---- */
   .banner {
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 6px;
     margin-bottom: 10px;
     font-weight: 500;
     font-size: var(--fs-meta);
@@ -735,6 +735,7 @@ async function loadCorpusFromBitable() {
       topic: get(f, casesIdx, "topic"),
       policy_code: get(f, casesIdx, "policy_code"),
       policy_title: get(f, casesIdx, "policy_title"),
+      tier_version: get(f, casesIdx, "tier_version") || get(f, casesIdx, "rule_version") || "",
       decision: get(f, casesIdx, "decision"),
       key_signals: getArr(f, casesIdx, "key_signals"),
       reference_weight: get(f, casesIdx, "reference_weight"),
@@ -763,6 +764,7 @@ async function loadCorpusFromBitable() {
       issue: get(f, rulesIdx, "issue") || get(f, rulesIdx, "policy_area"),
       policy_title: ptScalar,            // legacy scalar — used by precedent filters
       policy_titles: ptArr.length ? ptArr : (ptScalar ? [ptScalar] : []),  // V3.0 array
+      tier_version: get(f, rulesIdx, "tier_version") || "V0.3",
       rule_description: get(f, rulesIdx, "plain_description"),
       rule_text: get(f, rulesIdx, "plain_rule_text"),
       examples: get(f, rulesIdx, "example_cases"),
@@ -770,7 +772,7 @@ async function loadCorpusFromBitable() {
     };
   });
 
-  try { console.log("[CaseReview] V3.2.0 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
+  try { console.log("[CaseReview] V2.6.0 pending parser active; pendingRecs.length=", pendingRecs.length); } catch(e) {}
   const pending = pendingRecs.map(r => {
     const f = r.fields || {};
     return {
@@ -783,66 +785,78 @@ async function loadCorpusFromBitable() {
       asr_text: get(f, pendingIdx, "asr_text"),
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
-      _keyframeTokens: (function(){
-        // V3.2.0: Read attachment tokens from "keyframes" field.
-        // Actual URLs resolved async after load via table.getAttachmentUrl()
+      image_urls: (function(){
+        // V2.6.0: Prefer attachment field (image_attachments). Lark SDK returns
+        // [{token,name,type,size,url,tmpUrl}, ...] with short-lived signed *.feishu.cn URLs
+        // that bypass ibyteimg origin/referer restrictions. Falls back to legacy image_urls
+        // text field for un-migrated rows.
         var att = readCell(f, pendingIdx, "keyframes");
         if (Array.isArray(att) && att.length) {
-          return att.filter(function(a){ return a && a.token; });
+          var attUrls = att
+            .map(function(a){ return a && (a.url || a.tmpUrl || a.tmp_url || a.link) || ""; })
+            .filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
+          if (attUrls.length) {
+            try { console.log("[CaseReview] keyframes hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
+            return attUrls;
+          }
         }
-        return [];
+        var raw = readCell(f, pendingIdx, "image_urls");
+        var out = [];
+        var pushAll = function(arr){ if (Array.isArray(arr)) arr.forEach(function(x){ if (x != null) out.push(x); }); };
+        if (raw == null) { /* empty */ }
+        else if (Array.isArray(raw)) {
+          pushAll(raw.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.name||x.link||x.url)) || ""; }));
+        } else if (typeof raw === "object") {
+          var t0 = raw.text || raw.name || raw.link || raw.url;
+          if (t0) out.push(String(t0));
+        } else {
+          var str = String(raw).trim();
+          if (str) {
+            var consumed = false;
+            // 1) JSON parse (handles '["url1","url2"]' with \u0026 encoded ampersands)
+            if (str.charAt(0) === "[" || str.charAt(0) === "{") {
+              try {
+                var parsed = JSON.parse(str);
+                if (Array.isArray(parsed)) {
+                  pushAll(parsed.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.url||x.link)) || ""; }));
+                  consumed = true;
+                } else if (parsed && typeof parsed === "object") {
+                  var tv = parsed.text || parsed.url || parsed.link;
+                  if (tv) { out.push(String(tv)); consumed = true; }
+                }
+              } catch (e) { /* fall through */ }
+            }
+            // 2) Regex-extract every http(s):// URL — also runs as fallback when JSON.parse fails on truncated input
+            if (!consumed) {
+              // Decode \u0026 -> & and similar before regex
+              var decoded = str.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+              var matches = decoded.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
+              if (matches && matches.length) {
+                // Bitable text cells truncate at ~50k chars. If JSON.parse failed, the last URL is likely truncated.
+                // Drop trailing URLs that look incomplete: missing x-signature or ending with stray % / & (signature truncated).
+                var jsonFailed = (str.charAt(0) === "[" || str.charAt(0) === "{");
+                if (jsonFailed && matches.length > 0) {
+                  var last = matches[matches.length - 1];
+                  var looksTruncated = !/x-signature=[^&\s]+/.test(last) || /[%&]$/.test(last) || /%[0-9A-Fa-f]?$/.test(last);
+                  if (looksTruncated) {
+                    try { console.warn("[CaseReview] dropping truncated trailing URL:", last.slice(-60)); } catch(_){}
+                    matches = matches.slice(0, -1);
+                  }
+                }
+                pushAll(matches);
+              }
+            }
+          }
+        }
+        // STRICT FILTER: only keep absolute http(s) URLs — no fragments, no relative paths
+        var clean = out
+          .map(function(u){ return (typeof u === "string") ? u.trim() : ""; })
+          .filter(function(u){ return /^https?:\/\//i.test(u); });
+        try { var _svid = get(f, pendingIdx, "source_video_id"); var _rawPrev = (typeof raw === "string") ? raw.slice(0,180) : (raw==null?"<null>":JSON.stringify(raw).slice(0,180)); console.log("[CaseReview] image_urls parsed for", _svid, ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw preview:", _rawPrev); } catch(e) { try { console.warn("[CaseReview] image_urls log failed:", e && e.message); } catch(_){} }
+        return clean;
       })(),
-      _recordId: r.recordId || r.record_id,
-      image_urls: [],
     };
   }).filter(p => p.source_video_id);
-
-  // V3.2.0: Attachment URL resolution is deferred to after first render.
-  // Store table reference for lazy resolution in the component.
-  const _pendingTblRef = pendingTbl;
-  const _pendingIdxRef = pendingIdx;
-
-  // Helper: resolve attachment URLs for a single pending record (called lazily)
-  async function resolveKeyframeUrls(p) {
-    if (p.image_urls && p.image_urls.length) return p.image_urls; // already resolved
-    if (!p._keyframeTokens || !p._keyframeTokens.length || !_pendingTblRef) return [];
-    const fieldId = _pendingIdxRef && _pendingIdxRef.byName && _pendingIdxRef.byName["keyframes"];
-    if (!fieldId) return [];
-    try {
-      const field = await _pendingTblRef.getFieldById(fieldId);
-      // Try multiple SDK methods for getting attachment URLs
-      let urls = [];
-      if (typeof field.getAttachmentUrls === "function") {
-        const result = await Promise.race([
-          field.getAttachmentUrls(p._recordId),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))
-        ]);
-        if (Array.isArray(result)) urls = result.map(u => (typeof u === "string") ? u : (u && u.url || "")).filter(Boolean);
-      }
-      if (!urls.length && typeof field.getTmpUrls === "function") {
-        const result = await Promise.race([
-          field.getTmpUrls(p._keyframeTokens.map(t => t.token)),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))
-        ]);
-        if (Array.isArray(result)) urls = result.map(u => (typeof u === "string") ? u : (u && u.tmpUrl || u && u.url || "")).filter(Boolean);
-      }
-      if (!urls.length) {
-        // Last resort: construct URLs from tokens using known Bitable pattern
-        urls = p._keyframeTokens
-          .map(t => t.tmp_url || t.tmpUrl || t.url || "")
-          .filter(u => /^https?:\/\//i.test(u));
-      }
-      if (urls.length) {
-        p.image_urls = urls;
-        try { console.log("[CaseReview] keyframes resolved for", p.source_video_id, ":", urls.length, "URLs"); } catch(_){}
-      }
-      return urls;
-    } catch (e) {
-      try { console.warn("[CaseReview] resolveKeyframeUrls failed for", p.source_video_id, ":", e && e.message); } catch(_){}
-      return [];
-    }
-  }
-  window.__resolveKeyframeUrls = resolveKeyframeUrls;
 
   // Distinct facets for filter dropdowns
   const issuesSet = new Set();
@@ -1023,36 +1037,55 @@ const DISAMBIGUATION_SCORE_FLOOR = 1; // at least one query token must hit
 const DISAMBIGUATION_MIN_RUNNERUP_RATIO = 0.6; // runner-up must be ≥60% of leader
 
 function findDisambiguationCandidates(rules, l1Ranking) {
-  if (!Array.isArray(l1Ranking) || l1Ranking.length < 2) return [];
-  const leader = l1Ranking[0];
-  if (!leader || leader.score < DISAMBIGUATION_SCORE_FLOOR) return [];
-  // Walk the ranking and collect distinct policies above the floor with score≥ratio*leader.
-  const policiesHit = new Set();
-  if (leader.policy_title) policiesHit.add(leader.policy_title);
-  for (let i = 1; i < l1Ranking.length; i++) {
-    const r = l1Ranking[i];
-    if (!r || r.score < DISAMBIGUATION_SCORE_FLOOR) break;
-    if (r.score < leader.score * DISAMBIGUATION_MIN_RUNNERUP_RATIO) break;
-    if (r.policy_title) policiesHit.add(r.policy_title);
-  }
-  if (policiesHit.size < 2) return [];
-
-  const policies = Array.from(policiesHit);
   const out = [];
-  for (const r of rules || []) {
-    if (_ruleTypeOf(r) !== RULE_TYPE_L3) continue;
-    const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
-    const hits = policies.filter(p => titles.indexOf(p) !== -1).length;
-    if (hits >= 2) {
-      out.push(Object.assign({}, r, {
-        trigger_reason:
-          "Retriever surfaced L1 candidates from ≥2 policies (" + policies.join(" + ") +
-          "); this L3 covers " + hits + " of them."
-      }));
+  if (Array.isArray(l1Ranking) && l1Ranking.length >= 2) {
+    const leader = l1Ranking[0];
+    if (leader && leader.score >= DISAMBIGUATION_SCORE_FLOOR) {
+      // Walk the ranking and collect distinct policies above the floor with score≥ratio*leader.
+      const policiesHit = new Set();
+      if (leader.policy_title) policiesHit.add(leader.policy_title);
+      for (let i = 1; i < l1Ranking.length; i++) {
+        const r = l1Ranking[i];
+        if (!r || r.score < DISAMBIGUATION_SCORE_FLOOR) break;
+        if (r.score < leader.score * DISAMBIGUATION_MIN_RUNNERUP_RATIO) break;
+        if (r.policy_title) policiesHit.add(r.policy_title);
+      }
+      if (policiesHit.size >= 2) {
+        const policies = Array.from(policiesHit);
+        for (const r of rules || []) {
+          if (_ruleTypeOf(r) !== RULE_TYPE_L3) continue;
+          const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
+          const hits = policies.filter(p => titles.indexOf(p) !== -1).length;
+          if (hits >= 2) {
+            out.push(Object.assign({}, r, {
+              trigger_reason:
+                "Retriever surfaced L1 candidates from ≥2 policies (" + policies.join(" + ") +
+                "); this L3 covers " + hits + " of them."
+            }));
+          }
+        }
+      }
     }
   }
-  // Limit to top-3 by name (deterministic) to keep the prompt compact.
-  return out.slice(0, 3);
+  // V0.4: ALWAYS inject the 4 NSA-family shared L3 rules. The skill needs them to
+  // route correctly even when the L1 ranking does not span ≥2 policies (e.g. a
+  // pure AN candidate must still see L3.SHARED.StaticNudityVsSexualActivity).
+  const issueIsNsa = (rules || []).some(r => r.issue === "NSA");
+  if (issueIsNsa) {
+    const seen = new Set(out.map(r => r.rule_name));
+    for (const r of (rules || [])) {
+      if (r.issue !== "NSA") continue;
+      if (_ruleTypeOf(r) !== RULE_TYPE_L3) continue;
+      if (!_matchesSharedKey(r.rule_name, NSA_SHARED_L3)) continue;
+      if (seen.has(r.rule_name)) continue;
+      out.push(Object.assign({}, r, {
+        trigger_reason: "Shared NSA L3 always injected for NSA candidates (V0.3 collapsed-tier rulebook)."
+      }));
+      seen.add(r.rule_name);
+    }
+  }
+  // Limit to top-7 to keep the prompt compact (4 NSA shared + up to 3 contextual).
+  return out.slice(0, 7);
 }
 
 // V3.0: exception slot — fires when the candidate query matches vertical-specific
@@ -1084,31 +1117,75 @@ function detectExemptionSignals(queryText) {
 
 function findExceptionCandidates(rules, candidatePolicy, queryText) {
   const signals = detectExemptionSignals(queryText);
-  if (!signals.length) return [];
   const out = [];
-  for (const r of rules || []) {
-    if (_ruleTypeOf(r) !== RULE_TYPE_L2) continue;
-    // L2 must be owned by the candidate's policy (or be the universal Public Value gate L2.01)
-    const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
-    const isUniversal = /public value|p1|p2|p3|p4|^l2\.01\b/i.test(r.rule_name || "") || /public value/i.test(r.rule_text || "");
-    const ownsPolicy = candidatePolicy && titles.indexOf(candidatePolicy) !== -1;
-    if (!isUniversal && !ownsPolicy) continue;
-    // Score against the same query — keeps deterministic ordering.
-    const ruleHay = ((r.rule_name || "") + " " + (r.rule_text || "") + " " + (r.examples || "")).toLowerCase();
-    const matched = signals.filter(s => ruleHay.indexOf(s.replace(/_/g, " ")) !== -1 || ruleHay.indexOf(s) !== -1);
-    if (!matched.length && !isUniversal) continue;
-    out.push(Object.assign({}, r, {
-      trigger_reason:
-        "Candidate signals match exemption pattern(s): " +
-        (matched.length ? matched.join(", ") : "universal L2 gate (Public Value Parameters)") + "."
-    }));
+  if (signals.length) {
+    for (const r of rules || []) {
+      if (_ruleTypeOf(r) !== RULE_TYPE_L2) continue;
+      // L2 must be owned by the candidate's policy (or be the universal Public Value gate L2.01)
+      const titles = Array.isArray(r.policy_titles) ? r.policy_titles : (r.policy_title ? [r.policy_title] : []);
+      const isUniversal = /public value|p1|p2|p3|p4|^l2\.01\b/i.test(r.rule_name || "") || /public value/i.test(r.rule_text || "");
+      const ownsPolicy = candidatePolicy && titles.indexOf(candidatePolicy) !== -1;
+      if (!isUniversal && !ownsPolicy) continue;
+      // Score against the same query — keeps deterministic ordering.
+      const ruleHay = ((r.rule_name || "") + " " + (r.rule_text || "") + " " + (r.examples || "")).toLowerCase();
+      const matched = signals.filter(s => ruleHay.indexOf(s.replace(/_/g, " ")) !== -1 || ruleHay.indexOf(s) !== -1);
+      if (!matched.length && !isUniversal) continue;
+      out.push(Object.assign({}, r, {
+        trigger_reason:
+          "Candidate signals match exemption pattern(s): " +
+          (matched.length ? matched.join(", ") : "universal L2 gate (Public Value Parameters)") + "."
+      }));
+    }
   }
-  return out.slice(0, 4);
+  // V0.4: ALWAYS inject NSA shared L0 gate + shared L2 exceptions for the NSA family.
+  // V0.3 collapses these into one record each; the skill needs them in companion_rules
+  // even if the signal-matcher missed and even if signals.length === 0.
+  const issueIsNsa = (rules || []).some(r => r.issue === "NSA");
+  if (issueIsNsa) {
+    const sharedKeys = NSA_SHARED_L0.concat(NSA_SHARED_L2);
+    const seen = new Set(out.map(r => r.rule_name));
+    for (const r of (rules || [])) {
+      if (r.issue !== "NSA") continue;
+      if (!_matchesSharedKey(r.rule_name, sharedKeys)) continue;
+      if (seen.has(r.rule_name)) continue;
+      out.push(Object.assign({}, r, {
+        trigger_reason: "Shared NSA " + (_ruleTypeOf(r) === "L0 — Shared" || /^L0/.test(r.rule_name) ? "L0 gate" : "L2 exception") +
+                        " always injected for NSA candidates (V0.3 collapsed-tier rulebook)."
+      }));
+      seen.add(r.rule_name);
+    }
+  }
+  return out.slice(0, 12);
 }
 
-// ---------- Mira payload builder (V2.3) ----------
-const PAYLOAD_VERSION = "v0.3";
+// ---------- Mira payload builder (V0.4 — V0.3 rulebook aligned) ----------
+const PAYLOAD_VERSION = "v0.4";
 const ISSUE_DEFAULT = "";
+
+// V0.4: shared NSA rules that always accompany an NSA candidate, regardless of
+// the candidate's specific policy_title. The V0.3 rulebook collapse stores these
+// once across the whole NSA family — the retriever must inject them into
+// companion_rules so the skill can apply them without freelancing.
+const NSA_SHARED_L0 = ["L0.01"];
+const NSA_SHARED_L2 = [
+  "L2.EDUCATIONAL", "L2.SCIENTIFIC", "L2.DOCUMENTARY",
+  "L2.ARTISTIC",    "L2.FICTIONAL",  "L2.HUMOUR_GENERAL",
+  "L2.HUMOUR_STAND_UP_ONLY", "L2.COMPILATION_OVERRIDE"
+];
+const NSA_SHARED_L3 = [
+  "L3.SHARED.AdultVsYouth",
+  "L3.SHARED.AnimationVsLiveAction",
+  "L3.SHARED.StaticNudityVsSexualActivity",
+  "L3.SHARED.VisualVsVerbal"
+];
+
+function _matchesSharedKey(ruleName, keys) {
+  if (!ruleName) return false;
+  for (const k of keys) {
+    if (ruleName.indexOf(k) !== -1) return true;
+  }
+  return false;
+}
 
 function truncStr(t, n) {
   t = (t || "").toString();
@@ -1125,6 +1202,9 @@ function _ruleToPayloadCompanion(r) {
     policy_title: Array.isArray(r.policy_titles) && r.policy_titles.length
       ? r.policy_titles
       : (r.policy_title ? [r.policy_title] : []),
+    tier_version: r.tier_version || "V0.3",
+    plain_description: truncStr(r.rule_description || "", 1200),
+    plain_rule_text:   truncStr(r.rule_text || "", 1200),
     rule_text: truncStr(r.rule_text, 1200),
     trigger_reason: r.trigger_reason || ""
   };
@@ -1151,6 +1231,7 @@ function buildPayload({ inputs, precedents, topRule, companionRules, issue }) {
       case_id: r.case_id || r.record_id || "",
       policy_code: r.policy_code || "",
       policy_title: r.policy_title || "",
+      tier_version: r.tier_version || r.rule_version || "",
       topic: r.topic || "",
       decision: r.decision || "",
       status: r.status || "",
@@ -1171,7 +1252,16 @@ function buildPayload({ inputs, precedents, topRule, companionRules, issue }) {
     rule_type: _ruleTypeOf(topRule) || RULE_TYPE_L1,
     issue: topRule.issue || "",
     policy_area: topRule.issue || "",
-    policy_title: topRule.policy_title || "",
+    // V0.4: emit as ARRAY to match V0.3 MultiSelect schema; companion rules already do this.
+    policy_title: Array.isArray(topRule.policy_titles) && topRule.policy_titles.length
+      ? topRule.policy_titles
+      : (topRule.policy_title ? [topRule.policy_title] : []),
+    tier_version: topRule.tier_version || "V0.3",
+    // V0.4: surface both V0.3 plain-text fields. The skill reads plain_rule_text for
+    // L1 conditions + [Gated by:] markers, and scans plain_description for the
+    // appended "— PASS examples (L1 criteria not met) —" block.
+    plain_description: truncStr(topRule.rule_description || "", 1500),
+    plain_rule_text:   truncStr(topRule.rule_text || "", 1500),
     rule_text: truncStr(topRule.rule_text, 1500),
     examples: truncStr(topRule.examples, 600),
   } : null;
@@ -1211,190 +1301,6 @@ function tryParseReasonedJson(raw) {
   }
 }
 
-// ---------- V3.2.0: Normalize different skill verdict schemas into a common shape ----------
-// V3.2.2: Safety net — recursively coerce any object values to strings before React render.
-// React 18 throws Error #31 when passed plain objects as children.
-function _sanitizeForReact(v) {
-  if (!v || typeof v !== "object") return v;
-  // Coerce applied_rule from object to string
-  if (v.applied_rule && typeof v.applied_rule === "object") {
-    if (!v.rule_rationale && v.applied_rule.rule_type) v.rule_rationale = String(v.applied_rule.rule_type);
-    v.applied_rule = String(v.applied_rule.rule_name || JSON.stringify(v.applied_rule));
-  }
-  // Coerce scalar display fields that must be strings
-  ["conclusion","draft_decision","policy_title","vertical","severity","pattern",
-   "rule_rationale","next_step","applied_rule","reason"].forEach(function(k) {
-    if (v[k] != null && typeof v[k] === "object" && !Array.isArray(v[k])) v[k] = JSON.stringify(v[k]);
-  });
-  // Sanitize precedent_analysis items
-  if (Array.isArray(v.precedent_analysis)) {
-    v.precedent_analysis = v.precedent_analysis.map(function(pa) {
-      if (!pa || typeof pa !== "object") return pa;
-      var safe = Object.assign({}, pa);
-      ["case_id","applicability","decision_alignment","note"].forEach(function(k) {
-        if (safe[k] != null && typeof safe[k] === "object") safe[k] = JSON.stringify(safe[k]);
-      });
-      if (Array.isArray(safe.shared_signals)) safe.shared_signals = safe.shared_signals.map(String);
-      if (Array.isArray(safe.conflicting_signals)) safe.conflicting_signals = safe.conflicting_signals.map(String);
-      return safe;
-    });
-  }
-  // Sanitize watch_outs
-  if (Array.isArray(v.watch_outs)) v.watch_outs = v.watch_outs.map(function(w) {
-    return (w != null && typeof w === "object") ? JSON.stringify(w) : w;
-  });
-  return v;
-}
-
-function normalizeVerdict(raw) {
-  if (!raw) return raw;
-  var v = Object.assign({}, raw);
-
-  // V3.2.2: Object safety handled by _sanitizeForReact at return sites
-
-  // CoT tag parser: splits a tagged reason string into reasoning.* fields
-  function _parseCoTTags(reason) {
-    if (!reason || typeof reason !== "string") return {};
-    var tags = ["RECALL CONTEXT","VISUAL ANALYSIS","TEXT ANALYSIS","PRECEDENT TRIAGE",
-                "FIRST PASS","SECOND PASS","VERDICT","SYNTHESIS","CONTEXT EVALUATION",
-                "FICTION/CONTEXT PRE-CHECK","POLICY MATCH","CONTEXT CHECK"];
-    var fieldMap = {
-      "RECALL CONTEXT":"recall_context","VISUAL ANALYSIS":"visual_analysis","TEXT ANALYSIS":"text_analysis",
-      "PRECEDENT TRIAGE":"precedent_triage","FIRST PASS":"first_pass","SECOND PASS":"second_pass",
-      "VERDICT":"verdict","SYNTHESIS":"synthesis","CONTEXT EVALUATION":"context_evaluation",
-      "FICTION/CONTEXT PRE-CHECK":"fiction_precheck","POLICY MATCH":"policy_match","CONTEXT CHECK":"context_check"
-    };
-    var escaped = tags.map(function(t){ return t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); });
-    var boundary = "\\[(?:" + escaped.join("|") + ")\\]";
-    var out = {};
-    tags.forEach(function(tag, idx){
-      var re = new RegExp("\\[" + escaped[idx] + "\\]\\s*([\\s\\S]*?)(?=" + boundary + "|$)");
-      var m = reason.match(re);
-      if (m && m[1] && m[1].trim()) out[fieldMap[tag]] = m[1].trim();
-    });
-    return out;
-  }
-
-  // Path A: Unified schema (conclusion + reason string with CoT tags)
-  if (v.conclusion && typeof v.reason === "string") {
-    v.draft_decision = v.conclusion;
-    if (v.confidence == null) v.confidence = 5;
-    if (v.grey == null) v.grey = v.confidence <= 4;
-    if (!v.vertical) v.vertical = v.policy_area || "";
-    if (!v.pattern) v.pattern = "";
-    if (!v.exemptions_applied) v.exemptions_applied = [];
-    if (!v.secondary_titles) v.secondary_titles = [];
-    if (!v.precedent_analysis) v.precedent_analysis = [];
-    if (!v.watch_outs) v.watch_outs = [];
-    v.reasoning = _parseCoTTags(v.reason);
-    // V3.2.2: applied_rule coercion now handled by _sanitizeForReact
-    return _sanitizeForReact(v);
-  }
-
-  // Path B: Legacy NSA Mira skill (draft_decision + reasoning object with .verdict)
-  if (v.draft_decision && v.reasoning && typeof v.reasoning === "object" && v.reasoning.verdict) {
-    v.conclusion = v.draft_decision;
-    if (v.confidence == null) v.confidence = 5;
-    if (v.grey == null) v.grey = v.confidence <= 4;
-    if (!v.vertical) v.vertical = "NSA";
-    if (!v.pattern) v.pattern = "";
-    if (!v.exemptions_applied) v.exemptions_applied = [];
-    if (!v.secondary_titles) v.secondary_titles = [];
-    var parts = [];
-    if (v.reasoning.visual_analysis) parts.push("[VISUAL ANALYSIS] " + v.reasoning.visual_analysis);
-    if (v.reasoning.text_analysis) parts.push("[TEXT ANALYSIS] " + v.reasoning.text_analysis);
-    if (v.reasoning.first_pass) parts.push("[FIRST PASS] " + v.reasoning.first_pass);
-    if (v.reasoning.second_pass) parts.push("[SECOND PASS] " + v.reasoning.second_pass);
-    if (v.reasoning.verdict) parts.push("[VERDICT] " + v.reasoning.verdict);
-    v.reason = parts.join(" ");
-    return _sanitizeForReact(v);
-  }
-
-  // Path C: Legacy HRA Mira skill (verdict.decision + first_pass/second_pass objects)
-  if (!v.conclusion && !v.draft_decision && v.verdict && v.verdict.decision) {
-    v.conclusion = v.verdict.decision === "ALLOW" ? "PASS" : v.verdict.decision;
-    v.draft_decision = v.conclusion;
-    if (v.verdict.confidence != null) {
-      v.confidence = v.verdict.confidence <= 1 ? Math.round(v.verdict.confidence * 10) : v.verdict.confidence;
-    }
-    if (v.confidence == null) v.confidence = 5;
-    if (v.grey == null) v.grey = v.confidence <= 4;
-    if (v.verdict.confidence_label) v.confidence_label = v.verdict.confidence_label;
-    if (v.verdict.rule_applied) v.applied_rule = v.verdict.rule_applied;
-    if (v.verdict.policy_notes) v.rule_rationale = v.verdict.policy_notes;
-    v.policy_title = v.policy_title || v.verdict.policy_title || v.policy_area || "";
-    if (!v.vertical) v.vertical = v.policy_area || "";
-    if (!v.pattern) v.pattern = "";
-    if (!v.exemptions_applied) v.exemptions_applied = [];
-    if (!v.secondary_titles) v.secondary_titles = [];
-    if (!v.watch_outs && v.verdict.rejection_reasons) {
-      v.watch_outs = Object.entries(v.verdict.rejection_reasons).map(function(e){ return e[0] + ": " + e[1]; });
-    }
-    if (!v.reasoning) v.reasoning = {};
-    if (v.verdict.reasoning) v.reasoning.verdict = v.verdict.reasoning;
-    if (v.first_pass && !v.reasoning.first_pass) {
-      var fp = v.first_pass;
-      v.reasoning.first_pass = (fp.initial_assessment || "") +
-        (Array.isArray(fp.candidate_signals) ? "\nSignals: " + fp.candidate_signals.join(", ") : "");
-    }
-    if (v.second_pass) {
-      var sp = v.second_pass;
-      if (sp.prosecutor_pass && !v.reasoning.first_pass) {
-        v.reasoning.first_pass = sp.prosecutor_pass.strongest_violation_argument || "";
-      }
-      if (sp.defense_pass && !v.reasoning.second_pass) {
-        v.reasoning.second_pass = sp.defense_pass.strongest_allow_argument || "";
-      }
-      if (sp.precedent_cross_check && !v.reasoning.visual_analysis) {
-        v.reasoning.visual_analysis = sp.precedent_cross_check;
-      }
-      if (Array.isArray(sp.precedent_analysis) && (!v.precedent_analysis || !v.precedent_analysis.length)) {
-        v.precedent_analysis = sp.precedent_analysis.map(function(pa) {
-          return {
-            case_id: pa.precedent_id || pa.case_id || "",
-            applicability: pa.relevance === "MODERATE" ? "PARTIAL" :
-                           pa.relevance === "NONE" ? "NON-APPLICABLE" :
-                           pa.relevance === "HIGH" ? "APPLICABLE" : "NON-APPLICABLE",
-            shared_signals: [], conflicting_signals: [],
-            decision_alignment: pa.decision === "FLAG" ? "supports FLAG" : pa.decision === "PASS" ? "supports PASS" : "not informative",
-            note: pa.reasoning || ""
-          };
-        });
-      }
-    }
-    if (!v.severity && v.verdict && v.verdict.severity) v.severity = v.verdict.severity;
-    var rparts = [];
-    if (v.reasoning.visual_analysis) rparts.push("[VISUAL ANALYSIS] " + v.reasoning.visual_analysis);
-    if (v.reasoning.first_pass) rparts.push("[FIRST PASS] " + v.reasoning.first_pass);
-    if (v.reasoning.second_pass) rparts.push("[SECOND PASS] " + v.reasoning.second_pass);
-    if (v.reasoning.verdict) rparts.push("[VERDICT] " + v.reasoning.verdict);
-    v.reason = rparts.join(" ");
-    return _sanitizeForReact(v);
-  }
-
-  // Path D: Eval pipeline (conclusion already set, reason string)
-  if (v.conclusion) {
-    v.draft_decision = v.conclusion;
-    if (v.confidence == null) v.confidence = 5;
-    if (v.grey == null) v.grey = v.confidence <= 4;
-    v.reasoning = _parseCoTTags(typeof v.reason === "string" ? v.reason : "");
-    return _sanitizeForReact(v);
-  }
-
-  // Path E: Legacy NSA without reasoning.verdict (just draft_decision)
-  if (v.draft_decision) {
-    v.conclusion = v.draft_decision;
-    if (!v.reasoning) v.reasoning = {};
-    if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
-    return _sanitizeForReact(v);
-  }
-
-  // Fallback
-  if (v.grey == null && v.confidence != null) v.grey = v.confidence <= 4;
-  if (!v.reasoning) v.reasoning = {};
-  return _sanitizeForReact(v);
-}
-
 // ---------- V2.7.0: in-memory log ring buffer (for Diagnostics view) ----------
 const LOG_RING_CAP = 200;
 const LOG_RING = [];
@@ -1423,89 +1329,42 @@ const LOG_RING = [];
 window.__getLogRing = () => LOG_RING.slice();
 
 
-// V3.2.1: clipboard helper that survives Bitable's Permissions-Policy block.
-// Strategy: (1) navigator.clipboard.writeText, (2) execCommand with textarea,
-// (3) execCommand with Selection API, (4) show copy-dialog as last resort.
+// V2.7.1: clipboard helper that survives Bitable's Permissions-Policy block.
+// Tries navigator.clipboard.writeText, then falls back to execCommand('copy')
+// on a hidden textarea. Returns a Promise<boolean>.
 async function safeCopy(text) {
   text = String(text == null ? "" : text);
-  // Strategy 1: Modern Clipboard API
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
       return true;
     }
   } catch (e) {
-    try { console.warn("[CaseReview] clipboard API blocked:", e && e.message || e); } catch(_){}
+    // permissions-policy block or transient — fall through to legacy path
+    try { console.warn("[CaseReview] clipboard API blocked; using execCommand fallback:", e && e.message || e); } catch(_){}
   }
-  // Strategy 2: execCommand with textarea (works if iframe has focus)
   try {
     var ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
-    Object.assign(ta.style, { position:"fixed", top:"-9999px", left:"-9999px", opacity:"0" });
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    ta.style.pointerEvents = "none";
     document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    var ok = document.execCommand("copy");
+    ta.focus(); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch(_) { ok = false; }
     document.body.removeChild(ta);
-    if (ok) return true;
-  } catch (_) {}
-  // Strategy 3: execCommand with contenteditable div + Selection API
-  try {
-    var div = document.createElement("div");
-    div.setAttribute("contenteditable", "true");
-    Object.assign(div.style, { position:"fixed", top:"-9999px", left:"-9999px", opacity:"0", whiteSpace:"pre" });
-    div.textContent = text;
-    document.body.appendChild(div);
-    var range = document.createRange();
-    range.selectNodeContents(div);
-    var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    var ok2 = document.execCommand("copy");
-    sel.removeAllRanges();
-    document.body.removeChild(div);
-    if (ok2) return true;
-  } catch (_) {}
-  // Strategy 4: Show inline copy prompt (user manually copies)
-  try {
-    console.warn("[CaseReview] All clipboard methods failed. Showing copy dialog.");
-    _showCopyDialog(text);
-  } catch (_) {}
-  return false;
-}
-
-// Inline copy dialog -- last resort when all clipboard APIs are blocked
-function _showCopyDialog(text) {
-  var existing = document.getElementById("__safecopy_dialog");
-  if (existing) existing.remove();
-  var overlay = document.createElement("div");
-  overlay.id = "__safecopy_dialog";
-  Object.assign(overlay.style, {
-    position:"fixed", inset:"0", zIndex:"99999",
-    background:"rgba(20,20,19,0.5)", display:"flex", alignItems:"center", justifyContent:"center",
-  });
-  var card = document.createElement("div");
-  Object.assign(card.style, {
-    background:"#faf9f5", borderRadius:"12px", padding:"20px", maxWidth:"520px", width:"90%",
-    maxHeight:"60vh", display:"flex", flexDirection:"column", gap:"10px",
-    boxShadow:"0 8px 32px rgba(0,0,0,0.18)", fontFamily:"Inter,sans-serif", fontSize:"13px",
-  });
-  card.innerHTML = '<div style="font-weight:600;font-size:14px;color:#141413">Copy to clipboard</div>'
-    + '<div style="color:#6c6a64;font-size:12px">Clipboard access is blocked in this iframe. Select all text below (Ctrl/Cmd+A) and copy manually.</div>'
-    + '<textarea id="__safecopy_ta" readonly style="flex:1;min-height:120px;max-height:40vh;padding:8px;border:1px solid #e6dfd8;border-radius:6px;font:11px/1.4 JetBrains Mono,monospace;resize:none;color:#3d3d3a;background:#fff"></textarea>'
-    + '<button id="__safecopy_close" style="align-self:flex-end;background:#cc785c;color:#fff;border:0;border-radius:6px;padding:6px 14px;font:500 13px/1 Inter,sans-serif;cursor:pointer">Close</button>';
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
-  var taEl = document.getElementById("__safecopy_ta");
-  taEl.value = text;
-  taEl.focus();
-  taEl.select();
-  document.getElementById("__safecopy_close").onclick = function() { overlay.remove(); };
-  overlay.onclick = function(ev) { if (ev.target === overlay) overlay.remove(); };
+    return !!ok;
+  } catch (e) {
+    try { console.error("[CaseReview] execCommand copy fallback failed:", e && e.message || e); } catch(_){}
+    return false;
+  }
 }
 window.__safeCopy = safeCopy;
-// ---------- V3.2.0: Copy keyframes as composite image to clipboard ----------
+// ---------- V3.1.0: Copy keyframes as composite image to clipboard ----------
 async function copyKeyframesToClipboard(urls) {
   if (!urls || !urls.length) return false;
   try {
@@ -1565,21 +1424,12 @@ async function copyKeyframesToClipboard(urls) {
       console.log("[CaseReview] Keyframes composite copied to clipboard (" + loaded.length + " frames)");
       return true;
     } catch (clipErr) {
-      // Clipboard API blocked — download as fallback
-      console.warn("[CaseReview] Clipboard image write blocked:", clipErr.message);
+      // Clipboard API blocked — open in new tab as fallback
+      console.warn("[CaseReview] Clipboard image write blocked, opening in tab:", clipErr.message);
       const dataUrl = canvas.toDataURL("image/png");
       const w = window.open("");
       if (w) {
         w.document.write("<title>Keyframes — copy this image</title><body style=\"margin:0;background:#181715\"><img src=\"" + dataUrl + "\" style=\"max-width:100%\"><p style=\"color:#fff;font:13px sans-serif;padding:8px\">Right-click → Copy image, then paste into Mira chat.</p></body>");
-      } else {
-        // window.open blocked in iframe -- trigger download
-        const a = document.createElement("a");
-        a.href = dataUrl;
-        a.download = "keyframes_composite.png";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        console.log("[CaseReview] Keyframes image downloaded as fallback");
       }
       return false;
     }
@@ -1596,33 +1446,44 @@ function Tag({ kind, children }) {
   return h("span", { className: "tag " + (kind || "") }, children);
 }
 
-// ---------- KeyframesPreview (V3.2.0 — thumbnail grid from attachment URLs + copy) ----------
-function KeyframesPreview({ urls, onCopy, copied }) {
-  const [errors, setErrors] = useState({});
+// ---------- Carousel (V2.7.0) ----------
+function Carousel({ urls }) {
+  const [i, setI] = useState(0);
+  const [err, setErr] = useState({});
   const list = Array.isArray(urls) ? urls : [];
   if (!list.length) return null;
-  const onImgError = (idx) => setErrors(e => Object.assign({}, e, { [idx]: true }));
-  return h("div", { style: { padding: "4px 0" } },
-    h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "4px", marginBottom: 8 } },
-      list.slice(0, 12).map((url, i) =>
-        h("div", { key: i, style: { position: "relative", aspectRatio: "4/3", background: "var(--surface-dark)", borderRadius: 4, overflow: "hidden" } },
-          errors[i]
-            ? h("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted-soft)", fontSize: 11 } }, "# " + (i+1))
-            : h("img", {
-                src: url,
-                alt: "frame " + (i + 1),
-                referrerPolicy: "no-referrer",
-                loading: i < 4 ? "eager" : "lazy",
-                onError: () => onImgError(i),
-                style: { width: "100%", height: "100%", objectFit: "cover" },
-              }),
-          h("span", { style: { position: "absolute", top: 2, left: 2, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 9, padding: "1px 4px", borderRadius: 3 } }, "#" + (i+1)),
-        )
+  const cur = list[Math.min(i, list.length - 1)];
+  const onPrev = () => setI(x => Math.max(0, x - 1));
+  const onNext = () => setI(x => Math.min(list.length - 1, x + 1));
+  const onErr = () => setErr(e => Object.assign({}, e, { [i]: true }));
+  return h("div", { className: "carousel" },
+    h("div", { className: "car-frame" },
+      err[i]
+        ? h("div", { className: "car-fallback" }, "Image blocked by CDN. ",
+            h("a", { href: cur, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--primary)" } }, "Open in tab ↗"))
+        : h("img", {
+            src: cur,
+            alt: "keyframe " + (i + 1),
+            referrerPolicy: "no-referrer",
+            loading: i === 0 ? "eager" : "lazy",
+            onError: onErr,
+          }),
+      h("div", { className: "car-counter" }, (i + 1) + " / " + list.length),
+      list.length > 1 && h("div", { className: "car-controls" },
+        h("button", { className: "car-btn", onClick: onPrev, disabled: i === 0, "aria-label": "previous" }, "‹"),
+        h("button", { className: "car-btn", onClick: onNext, disabled: i === list.length - 1, "aria-label": "next" }, "›"),
       ),
     ),
-    list.length > 12 && h("div", { className: "hint", style: { marginBottom: 4 } }, "+" + (list.length - 12) + " more (showing first 12)"),
-    h("button", { className: "secondary", onClick: onCopy, style: { width: "100%", marginTop: 4 } },
-      copied ? ("✓ " + list.length + " frames copied to clipboard") : ("Copy " + list.length + " keyframes as image")),
+    list.length > 1 && h("div", { className: "car-dots" },
+      list.map((_, j) => h("button", {
+        key: j,
+        className: "car-dot " + (j === i ? "active" : ""),
+        onClick: () => setI(j),
+        "aria-label": "frame " + (j + 1),
+      })),
+    ),
+    h("a", { className: "car-open", href: cur, target: "_blank", rel: "noopener noreferrer" },
+      "Open frame " + (i + 1) + " in new tab ↗"),
   );
 }
 
@@ -1654,6 +1515,37 @@ function ConsistencyBanner({ precedents }) {
   return h("div", { className: "banner mixed" },
     "⚠ Mixed — " + flags + " FLAG / " + passes + " PASS in top-" + precedents.length + ". Grey case.");
 }
+
+) {
+  if (!precedents.length) {
+    return h("div", { className: "decision-box" },
+      h("h4", null, "Draft decision"),
+      h("div", { className: "d-row" }, h("b", null, "decision"), h("span", { className: "muted" }, "no precedent — author new rule")),
+      h("div", { className: "d-row" }, h("b", null, "case_type"), h(Tag, { kind: "grey" }, "grey (novel)")),
+    );
+  }
+  const flags = precedents.filter(p => p.raw.decision === "FLAG").length;
+  const passes = precedents.filter(p => p.raw.decision === "PASS").length;
+  const total = flags + passes;
+  const mixed = flags > 0 && passes > 0;
+  const decision = flags > passes ? "FLAG" : (passes > flags ? "PASS" : "—");
+  const caseType = mixed ? "grey" : "routine";
+  const topSim = precedents[0].sim;
+  const confidence = topSim > 0.7 && !mixed ? "high" : topSim > 0.4 || mixed ? "medium" : "low";
+  return h("div", { className: "decision-box" },
+    h("h4", null, "Draft decision"),
+    h("div", { className: "d-row" }, h("b", null, "decision"),
+      h(Tag, { kind: decision === "FLAG" ? "flag" : "pass" }, decision),
+      h("span", { className: "muted mono" }, "(" + Math.max(flags, passes) + "/" + total + ")")),
+    h("div", { className: "d-row" }, h("b", null, "type"),
+      h(Tag, { kind: caseType === "grey" ? "grey" : "routine" }, caseType)),
+    h("div", { className: "d-row" }, h("b", null, "rule"),
+      topRule ? h("span", { className: "mono" }, topRule.rule_name) : h("span", { className: "muted" }, "no rule")),
+    h("div", { className: "d-row" }, h("b", null, "conf."),
+      h("span", null, confidence, " ", h("span", { className: "muted mono" }, "(sim " + topSim.toFixed(2) + ")"))),
+  );
+}
+
 // ---------- Precedent (accordion item) ----------
 function PrecedentAccordion({ r, rank, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
@@ -1732,40 +1624,10 @@ function _gapDots(gap) {
   );
 }
 
-// V3.2.2: Error boundary for verdict rendering — catches React render errors gracefully
-class VerdictErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) {
-    try { console.error("[CaseReview] Verdict render error:", error, info); } catch(_){}
-  }
-  render() {
-    if (this.state.error) {
-      return h("div", { className: "banner no-match", style: { margin: "8px 0" } },
-        h("div", { style: { fontWeight: 500, marginBottom: 4 } }, "Verdict render error"),
-        h("div", { style: { fontSize: "12px" } }, String(this.state.error && this.state.error.message || this.state.error)),
-        h("button", { className: "secondary tiny", style: { marginTop: 6 },
-          onClick: () => this.setState({ error: null }) }, "Retry"));
-    }
-    return this.props.children;
-  }
-}
-
-function ReasonedVerdict({ v: rawV }) {
-  if (!rawV) return null;
-  var v;
-  try { v = normalizeVerdict(rawV); } catch(e) {
-    return h("div", { className: "banner no-match" }, "Verdict parse error: " + (e && e.message || e));
-  }
-  try { return _ReasonedVerdictInner(v); } catch(e) {
-    return h("div", { className: "banner no-match" },
-      h("div", null, "Render error: " + (e && e.message || e)),
-      h("pre", { style: { fontSize: "11px", marginTop: 6 } }, JSON.stringify(rawV, null, 2).slice(0, 500)));
-  }
-}
-function _ReasonedVerdictInner(v) {
-  const dec = (v.conclusion || v.draft_decision || "").toUpperCase();
-  const decKind = dec === "FLAG" ? "flag" : (dec === "PASS" || dec === "ALLOW") ? "pass" : dec === "ESCALATE" ? "sim" : "sim";
+function ReasonedVerdict({ v }) {
+  if (!v) return null;
+  const dec = (v.draft_decision || "").toUpperCase();
+  const decKind = dec === "FLAG" ? "flag" : dec === "PASS" ? "pass" : "sim";
   const sevKind = (v.severity === "SEVERE") ? "flag" : (v.severity === "LIGHT") ? "sim" : "muted";
   // V3.0: derive legacy boolean if not provided
   const gap = v.policy_gap && typeof v.policy_gap === "object" ? v.policy_gap : null;
@@ -1961,14 +1823,13 @@ function MainApp({ corpus, onReloadCorpus }) {
   // ---- Pre-fill from a Pending Cases row ----
   const applyPending = useCallback((p) => {
     if (!p) return;
-    const initialUrls = (p.image_urls && p.image_urls.length) ? p.image_urls : [];
     setInputs({
       item_id: p.source_video_id || "",
       visual_summary: p.visual_summary || "",
       asr_text: p.asr_text || "",
       ocr_text: p.ocr_text || "",
       caption_text: p.caption_text || "",
-      image_urls: initialUrls,
+      image_urls: (p.image_urls && p.image_urls.length) ? p.image_urls : [],
       issue: p.issue || "",
       title: p.policy_title || "",
       k: 5,
@@ -1978,16 +1839,7 @@ function MainApp({ corpus, onReloadCorpus }) {
     setReasonedRaw(""); setReasonedVerdict(null); setReasonedError("");
     setPayloadJson(""); setReasoningCopied(false);
     setShowHandoff(false);
-    setKeyframesCopied(false);
     setView("case");
-    // V3.2.0: Lazy-resolve attachment URLs if not already resolved
-    if (!initialUrls.length && p._keyframeTokens && p._keyframeTokens.length && window.__resolveKeyframeUrls) {
-      window.__resolveKeyframeUrls(p).then(function(resolved) {
-        if (resolved && resolved.length) {
-          setInputs(function(prev) { return Object.assign({}, prev, { image_urls: resolved }); });
-        }
-      });
-    }
   }, []);
 
   const onPickQueueItem = useCallback((sourceVideoId) => {
@@ -2171,10 +2023,14 @@ function QueueView({ pending, onPick, onNewCase }) {
 }
 
 function QueueCard({ p, onPick }) {
+  const thumb = (p.image_urls && p.image_urls[0]) || "";
+  const [err, setErr] = useState(false);
   return h("div", { className: "queue-card", onClick: onPick, role: "button", tabIndex: 0,
       onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } } },
     h("div", { className: "qc-thumb" },
-      h("span", null, (p.image_urls && p.image_urls.length) ? ("🖼 " + p.image_urls.length) : "—"),
+      thumb && !err
+        ? h("img", { src: thumb, alt: "", referrerPolicy: "no-referrer", loading: "lazy", onError: () => setErr(true) })
+        : h("span", null, (p.image_urls && p.image_urls.length) ? "🖼" : "—"),
     ),
     h("div", { className: "qc-meta" },
       h("div", { className: "qc-id" }, p.source_video_id || "(no id)"),
@@ -2240,9 +2096,9 @@ function CaseView({
       ),
     ),
 
-    // Keyframes preview grid (V3.2.0 — attachment thumbnails + copy)
+    // Carousel section
     urls.length > 0 && h(Section, { title: "Keyframes", defaultOpen: true, badge: urls.length },
-      h(KeyframesPreview, { urls: urls, onCopy: onCopyKeyframes, copied: keyframesCopied }),
+      h(Carousel, { urls }),
     ),
 
     // Result sections — only after Run
@@ -2268,30 +2124,31 @@ function CaseView({
       h(Section, { title: "Send to Mira reviewer", defaultOpen: showHandoff },
         h("div", { className: "hint", style: { marginBottom: 8 } },
           "Copy payload JSON + keyframe images into Mira chat (two pastes), then paste the reply below."),
-        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: 8 } },
-          h("button", { className: "secondary", onClick: onBuildPayload, style: { flex: "0 0 auto" } },
-            reasoningCopied ? "✓ JSON copied" : "Copy JSON"),
-          h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length, style: { flex: "0 0 auto" } },
-            keyframesCopied ? ("✓ " + urls.length + " frames copied") : ("Copy keyframes (" + urls.length + ")")),
+        h("div", { className: "row tight", style: { marginBottom: 8, flexWrap: "wrap", gap: "6px" } },
+          h("button", { className: "secondary", onClick: onBuildPayload },
+            reasoningCopied ? "✓ JSON copied" : "1. Copy JSON"),
+          h("button", { className: "secondary", onClick: onCopyKeyframes, disabled: !urls.length },
+            keyframesCopied ? ("✓ " + urls.length + " frames copied") : ("2. Copy keyframes (" + urls.length + ")")),
+          payloadJson && h("button", { className: "secondary tiny", onClick: () => { safeCopy(payloadJson); } }, "Re-copy JSON"),
         ),
         payloadJson && h("div", { className: "muted mono", style: { marginBottom: 8 } },
           payloadJson.length.toLocaleString() + " chars · " + PAYLOAD_VERSION + (urls.length ? " · paste JSON first, then paste keyframes" : "")),
         h("label", null, "Paste Mira's JSON reply"),
         h("textarea", {
           rows: 6, value: reasonedRaw,
-          placeholder: 'Paste Mira verdict JSON here (any specialist schema supported)...',
+          placeholder: '{"draft_decision":"...", "confidence":7, ...}',
           onChange: e => setReasonedRaw(e.target.value),
           style: { fontFamily: "var(--mono)", fontSize: "var(--fs-mono)" },
         }),
-        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: 6 } },
-          h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim(), className: "secondary", style: { flex: "0 0 auto" } }, "Render verdict"),
-          reasonedRaw && h("button", { className: "secondary", style: { flex: "0 0 auto" },
+        h("div", { className: "row tight", style: { marginTop: 6 } },
+          h("button", { onClick: onParseReply, disabled: !reasonedRaw.trim(), className: "secondary" }, "Render verdict"),
+          reasonedRaw && h("button", { className: "secondary tiny",
             onClick: () => { setReasonedRaw(""); } }, "Clear"),
         ),
         reasonedError && h("div", { style: { color: "var(--error)", fontSize: "var(--fs-meta)", marginTop: 6 } }, reasonedError),
       ),
 
-      reasonedVerdict && h(VerdictErrorBoundary, null, h(ReasonedVerdict, { v: reasonedVerdict })),
+      reasonedVerdict && h(ReasonedVerdict, { v: reasonedVerdict }),
     ),
 
     !result && h("div", { className: "hint", style: { padding: "10px 4px" } },
@@ -2386,28 +2243,6 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     ),
   );
 }
-
-// V3.2.1: Patch for React 18 Error #31 -- .closest() called on non-Element nodes.
-// React's synthetic event system assumes event.target is always an Element, but mouseup/mousedown
-// can target Text nodes inside the Bitable iframe. This patches Node.prototype to add a safe
-// .closest() that delegates to parentElement when called on non-Element nodes.
-(function patchClosestForReact18() {
-  if (typeof Node !== "undefined" && !Node.prototype.__closestPatched) {
-    var origClosest = Element.prototype.closest;
-    Object.defineProperty(Node.prototype, "closest", {
-      configurable: true,
-      writable: true,
-      value: function(selector) {
-        if (this.nodeType === 1) return origClosest.call(this, selector);
-        var el = this.parentElement || this.parentNode;
-        while (el && el.nodeType !== 1) el = el.parentNode;
-        return el ? origClosest.call(el, selector) : null;
-      }
-    });
-    Node.prototype.__closestPatched = true;
-    console.log("[CaseReview] Patched Node.prototype.closest for React 18 text-node safety");
-  }
-})();
 
 try {
         ReactDOM.createRoot(document.getElementById("root")).render(h(App));
