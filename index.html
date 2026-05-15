@@ -1386,39 +1386,86 @@ const LOG_RING = [];
 window.__getLogRing = () => LOG_RING.slice();
 
 
-// V2.7.1: clipboard helper that survives Bitable's Permissions-Policy block.
-// Tries navigator.clipboard.writeText, then falls back to execCommand('copy')
-// on a hidden textarea. Returns a Promise<boolean>.
+// V3.2.1: clipboard helper that survives Bitable's Permissions-Policy block.
+// Strategy: (1) navigator.clipboard.writeText, (2) execCommand with textarea,
+// (3) execCommand with Selection API, (4) show copy-dialog as last resort.
 async function safeCopy(text) {
   text = String(text == null ? "" : text);
+  // Strategy 1: Modern Clipboard API
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
       return true;
     }
   } catch (e) {
-    // permissions-policy block or transient — fall through to legacy path
-    try { console.warn("[CaseReview] clipboard API blocked; using execCommand fallback:", e && e.message || e); } catch(_){}
+    try { console.warn("[CaseReview] clipboard API blocked:", e && e.message || e); } catch(_){}
   }
+  // Strategy 2: execCommand with textarea (works if iframe has focus)
   try {
     var ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "0";
-    ta.style.left = "0";
-    ta.style.opacity = "0";
-    ta.style.pointerEvents = "none";
+    Object.assign(ta.style, { position:"fixed", top:"-9999px", left:"-9999px", opacity:"0" });
     document.body.appendChild(ta);
-    ta.focus(); ta.select();
-    var ok = false;
-    try { ok = document.execCommand("copy"); } catch(_) { ok = false; }
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    var ok = document.execCommand("copy");
     document.body.removeChild(ta);
-    return !!ok;
-  } catch (e) {
-    try { console.error("[CaseReview] execCommand copy fallback failed:", e && e.message || e); } catch(_){}
-    return false;
-  }
+    if (ok) return true;
+  } catch (_) {}
+  // Strategy 3: execCommand with contenteditable div + Selection API
+  try {
+    var div = document.createElement("div");
+    div.setAttribute("contenteditable", "true");
+    Object.assign(div.style, { position:"fixed", top:"-9999px", left:"-9999px", opacity:"0", whiteSpace:"pre" });
+    div.textContent = text;
+    document.body.appendChild(div);
+    var range = document.createRange();
+    range.selectNodeContents(div);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    var ok2 = document.execCommand("copy");
+    sel.removeAllRanges();
+    document.body.removeChild(div);
+    if (ok2) return true;
+  } catch (_) {}
+  // Strategy 4: Show inline copy prompt (user manually copies)
+  try {
+    console.warn("[CaseReview] All clipboard methods failed. Showing copy dialog.");
+    _showCopyDialog(text);
+  } catch (_) {}
+  return false;
+}
+
+// Inline copy dialog -- last resort when all clipboard APIs are blocked
+function _showCopyDialog(text) {
+  var existing = document.getElementById("__safecopy_dialog");
+  if (existing) existing.remove();
+  var overlay = document.createElement("div");
+  overlay.id = "__safecopy_dialog";
+  Object.assign(overlay.style, {
+    position:"fixed", inset:"0", zIndex:"99999",
+    background:"rgba(20,20,19,0.5)", display:"flex", alignItems:"center", justifyContent:"center",
+  });
+  var card = document.createElement("div");
+  Object.assign(card.style, {
+    background:"#faf9f5", borderRadius:"12px", padding:"20px", maxWidth:"520px", width:"90%",
+    maxHeight:"60vh", display:"flex", flexDirection:"column", gap:"10px",
+    boxShadow:"0 8px 32px rgba(0,0,0,0.18)", fontFamily:"Inter,sans-serif", fontSize:"13px",
+  });
+  card.innerHTML = '<div style="font-weight:600;font-size:14px;color:#141413">Copy to clipboard</div>'
+    + '<div style="color:#6c6a64;font-size:12px">Clipboard access is blocked in this iframe. Select all text below (Ctrl/Cmd+A) and copy manually.</div>'
+    + '<textarea id="__safecopy_ta" readonly style="flex:1;min-height:120px;max-height:40vh;padding:8px;border:1px solid #e6dfd8;border-radius:6px;font:11px/1.4 JetBrains Mono,monospace;resize:none;color:#3d3d3a;background:#fff"></textarea>'
+    + '<button id="__safecopy_close" style="align-self:flex-end;background:#cc785c;color:#fff;border:0;border-radius:6px;padding:6px 14px;font:500 13px/1 Inter,sans-serif;cursor:pointer">Close</button>';
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  var taEl = document.getElementById("__safecopy_ta");
+  taEl.value = text;
+  taEl.focus();
+  taEl.select();
+  document.getElementById("__safecopy_close").onclick = function() { overlay.remove(); };
+  overlay.onclick = function(ev) { if (ev.target === overlay) overlay.remove(); };
 }
 window.__safeCopy = safeCopy;
 // ---------- V3.2.0: Copy keyframes as composite image to clipboard ----------
@@ -1481,12 +1528,21 @@ async function copyKeyframesToClipboard(urls) {
       console.log("[CaseReview] Keyframes composite copied to clipboard (" + loaded.length + " frames)");
       return true;
     } catch (clipErr) {
-      // Clipboard API blocked — open in new tab as fallback
-      console.warn("[CaseReview] Clipboard image write blocked, opening in tab:", clipErr.message);
+      // Clipboard API blocked — download as fallback
+      console.warn("[CaseReview] Clipboard image write blocked:", clipErr.message);
       const dataUrl = canvas.toDataURL("image/png");
       const w = window.open("");
       if (w) {
         w.document.write("<title>Keyframes — copy this image</title><body style=\"margin:0;background:#181715\"><img src=\"" + dataUrl + "\" style=\"max-width:100%\"><p style=\"color:#fff;font:13px sans-serif;padding:8px\">Right-click → Copy image, then paste into Mira chat.</p></body>");
+      } else {
+        // window.open blocked in iframe -- trigger download
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = "keyframes_composite.png";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        console.log("[CaseReview] Keyframes image downloaded as fallback");
       }
       return false;
     }
@@ -2264,6 +2320,28 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     ),
   );
 }
+
+// V3.2.1: Patch for React 18 Error #31 -- .closest() called on non-Element nodes.
+// React's synthetic event system assumes event.target is always an Element, but mouseup/mousedown
+// can target Text nodes inside the Bitable iframe. This patches Node.prototype to add a safe
+// .closest() that delegates to parentElement when called on non-Element nodes.
+(function patchClosestForReact18() {
+  if (typeof Node !== "undefined" && !Node.prototype.__closestPatched) {
+    var origClosest = Element.prototype.closest;
+    Object.defineProperty(Node.prototype, "closest", {
+      configurable: true,
+      writable: true,
+      value: function(selector) {
+        if (this.nodeType === 1) return origClosest.call(this, selector);
+        var el = this.parentElement || this.parentNode;
+        while (el && el.nodeType !== 1) el = el.parentNode;
+        return el ? origClosest.call(el, selector) : null;
+      }
+    });
+    Node.prototype.__closestPatched = true;
+    console.log("[CaseReview] Patched Node.prototype.closest for React 18 text-node safety");
+  }
+})();
 
 try {
         ReactDOM.createRoot(document.getElementById("root")).render(h(App));
