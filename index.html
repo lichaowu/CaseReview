@@ -1216,6 +1216,12 @@ function normalizeVerdict(raw) {
   if (!raw) return raw;
   var v = Object.assign({}, raw);
 
+  // V3.2.1: Coerce applied_rule from object to display string (prevents React Error #31)
+  if (v.applied_rule && typeof v.applied_rule === "object") {
+    if (!v.rule_rationale && v.applied_rule.rule_type) v.rule_rationale = v.applied_rule.rule_type;
+    v.applied_rule = v.applied_rule.rule_name || JSON.stringify(v.applied_rule);
+  }
+
   // CoT tag parser: splits a tagged reason string into reasoning.* fields
   function _parseCoTTags(reason) {
     if (!reason || typeof reason !== "string") return {};
@@ -1251,6 +1257,11 @@ function normalizeVerdict(raw) {
     if (!v.precedent_analysis) v.precedent_analysis = [];
     if (!v.watch_outs) v.watch_outs = [];
     v.reasoning = _parseCoTTags(v.reason);
+    // V3.2.1: Normalize applied_rule from object to string for rendering
+    if (v.applied_rule && typeof v.applied_rule === "object") {
+      v.rule_rationale = v.applied_rule.rule_type || v.applied_rule.rule_version || "";
+      v.applied_rule = v.applied_rule.rule_name || JSON.stringify(v.applied_rule);
+    }
     return v;
   }
 
