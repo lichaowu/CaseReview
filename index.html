@@ -1682,7 +1682,7 @@ function ConsistencyBanner({ precedents }) {
     "⚠ Mixed — " + flags + " FLAG / " + passes + " PASS in top-" + precedents.length + ". Grey case.");
 }
 
-) {
+function DecisionBox({ precedents, topRule }) {
   if (!precedents.length) {
     return h("div", { className: "decision-box" },
       h("h4", null, "Draft decision"),
