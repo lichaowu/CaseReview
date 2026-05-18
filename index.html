@@ -785,57 +785,46 @@ async function loadCorpusFromBitable() {
       asr_text: get(f, pendingIdx, "asr_text"),
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
-      // V3.3.1: image_urls populated post-map by async getAttachmentUrls(). Empty here.
+      // V3.3.2: image_urls populated post-map by async getAttachmentUrls(). Empty here.
       image_urls: [],
     };
   }).filter(p => p.source_video_id);
 
-  // V3.3.1: Resolve "keyframes" attachment field via SDK getAttachmentUrls(recordId).
-  // The Bitable JS SDK returns signed *.feishu.cn temp URLs that bypass ibyteimg referer
-  // restrictions. We do this AFTER the sync .map() so each record gets fresh URLs.
-  // No legacy image_urls fallback — if keyframes is empty, the case has no images.
-  if (pendingTbl && pending.length) {
-    var keyframesFieldId = pendingIdx && pendingIdx.byName ? pendingIdx.byName["keyframes"] : null;
-    if (!keyframesFieldId) {
-      console.warn("[CaseReview] V3.3.1: 'keyframes' field NOT FOUND in Pending Cases table. Available:",
-        pendingIdx && pendingIdx.byName ? Object.keys(pendingIdx.byName) : "(no index)");
-    } else {
+  // V3.3.2: Lazy keyframes resolver — only fetches signed *.feishu.cn temp URLs
+  // for the ONE case the user opens, not all 73 pending records. Cached per-record.
+  var keyframesFieldId = pendingIdx && pendingIdx.byName ? pendingIdx.byName["keyframes"] : null;
+  var _kfFieldPromise = null; // memoized field handle
+  var _kfCache = new Map();   // recordId -> string[]
+  var _kfInFlight = new Map();// recordId -> Promise<string[]>
+  if (pendingTbl && !keyframesFieldId) {
+    console.warn("[CaseReview] V3.3.2: 'keyframes' field NOT FOUND in Pending Cases table. Available:",
+      pendingIdx && pendingIdx.byName ? Object.keys(pendingIdx.byName) : "(no index)");
+  }
+  async function resolveKeyframes(recordId) {
+    if (!recordId || !pendingTbl || !keyframesFieldId) return [];
+    if (_kfCache.has(recordId)) return _kfCache.get(recordId);
+    if (_kfInFlight.has(recordId)) return _kfInFlight.get(recordId);
+    var p = (async function(){
       try {
-        var kfField = await pendingTbl.getField(keyframesFieldId);
-        // Concurrency-capped resolution: 6 records in flight at a time.
-        var CONC = 6;
-        var queue = pending.slice();
-        var resolved = 0;
-        var failed = 0;
-        async function worker() {
-          while (queue.length) {
-            var p = queue.shift();
-            try {
-              var urls = await kfField.getAttachmentUrls(p.record_id);
-              if (Array.isArray(urls) && urls.length) {
-                p.image_urls = urls.filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
-                if (p.image_urls.length) resolved++;
-              }
-            } catch (e) {
-              failed++;
-              if (failed <= 3) {
-                try { console.warn("[CaseReview] V3.3.1 getAttachmentUrls failed for", p.source_video_id, ":", e && e.message); } catch(_){}
-              }
-            }
-          }
-        }
-        var workers = [];
-        for (var w = 0; w < CONC; w++) workers.push(worker());
-        await Promise.all(workers);
-        try {
-          var withImg = pending.filter(function(p){ return p.image_urls && p.image_urls.length; }).length;
-          console.log("[CaseReview] V3.3.1 keyframes resolved:", resolved, "records with URLs;",
-            withImg, "/", pending.length, "have ≥1 keyframe; failed:", failed);
-        } catch(_){}
+        if (!_kfFieldPromise) _kfFieldPromise = pendingTbl.getField(keyframesFieldId);
+        var kfField = await _kfFieldPromise;
+        var urls = await kfField.getAttachmentUrls(recordId);
+        var clean = Array.isArray(urls)
+          ? urls.filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); })
+          : [];
+        _kfCache.set(recordId, clean);
+        try { console.log("[CaseReview] V3.3.2 keyframes resolved for", recordId, ":", clean.length, "URLs"); } catch(_){}
+        return clean;
       } catch (e) {
-        console.warn("[CaseReview] V3.3.1: getField(keyframes) failed —", e && e.message);
+        try { console.warn("[CaseReview] V3.3.2 getAttachmentUrls failed for", recordId, ":", e && e.message); } catch(_){}
+        _kfCache.set(recordId, []);
+        return [];
+      } finally {
+        _kfInFlight.delete(recordId);
       }
-    }
+    })();
+    _kfInFlight.set(recordId, p);
+    return p;
   }
 
 
@@ -876,7 +865,7 @@ async function loadCorpusFromBitable() {
     }
   } catch (e) {}
 
-  return { cases, rules, pending, facets: { issues, titles, titlesByIssue: titlesByIssueArr } };
+  return { cases, rules, pending, facets: { issues, titles, titlesByIssue: titlesByIssueArr }, resolveKeyframes };
 }
 
 window.__loadCorpus = loadCorpusFromBitable;
@@ -1925,7 +1914,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.3.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.3.2")),
     );
   }
   if (corpusError) {
@@ -1936,7 +1925,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.3.1")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.3.2")),
     );
   }
   if (!corpus) return null;
@@ -2014,7 +2003,23 @@ function MainApp({ corpus, onReloadCorpus }) {
     setPayloadJson(""); setReasoningCopied(false);
     setShowHandoff(false);
     setView("case");
-  }, []);
+
+    // V3.3.2: Lazy keyframes fetch — only when this case is selected, not at corpus load.
+    if (p.record_id && (!p.image_urls || !p.image_urls.length) && typeof corpus.resolveKeyframes === "function") {
+      const targetRecId = p.record_id;
+      const targetSvid = p.source_video_id || "";
+      corpus.resolveKeyframes(targetRecId).then((urls) => {
+        if (Array.isArray(urls) && urls.length) {
+          // Cache on the pending object so re-select is instant.
+          p.image_urls = urls;
+          // Only update inputs if user is still on this case.
+          setInputs(prev => (prev && prev.item_id === targetSvid)
+            ? Object.assign({}, prev, { image_urls: urls })
+            : prev);
+        }
+      }).catch(() => {});
+    }
+  }, [corpus]);
 
   const onPickQueueItem = useCallback((sourceVideoId) => {
     const p = pendingMap.get(sourceVideoId);
@@ -2123,7 +2128,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.3.1"),
+      "build V3.3.2"),
   );
 
   // ---- Views ----
@@ -2387,7 +2392,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.3.1"); };
+  const copyStamp = () => { safeCopy("V3.3.2"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2396,7 +2401,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.3.1")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.3.2")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
