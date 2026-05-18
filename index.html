@@ -1007,6 +1007,141 @@ function _bm25LiteScore(r, queryTokens) {
   return s;
 }
 
+// ---------- V3.3 — Field-weighted BM25 + trigger-signal gating + precedent boost ----------
+//
+// Patch A: replaces the plain token-presence scorer above with a real BM25 over
+//          weighted rule fields (rule_name × 3.0, plain_rule_text × 2.0,
+//          example_cases × 1.5, plain_description × 1.0). IDF prevents common
+//          words ("body", "visible", "depicted") from dominating.
+//
+// Patch B: every L1 rule has a derived `trigger_signals` set extracted from
+//          rule_name + the first imperative sentence of plain_rule_text. An L1
+//          must have ≥1 trigger_signal token present in the candidate query OR
+//          score ≥ HARD_FLOOR to remain a candidate. Otherwise it is disqualified
+//          (score = 0). This prevents "fully clothed meme → ASA.L1.A penetrative
+//          sex" type retriever mismatches.
+//
+// Patch G: after precedents are retrieved, the top-3 precedents' rule_applied
+//          strings produce a per-rule prior boost. Rules whose rule_name shares
+//          tokens with top precedent rules get a small additive boost.
+
+const RULE_FIELD_WEIGHTS = {
+  rule_name: 3.0,
+  rule_text: 2.0,         // plain_rule_text — defines trigger conditions
+  examples: 1.5,          // example_cases
+  rule_description: 1.0,  // plain_description
+};
+
+const NSA_TRIGGER_STOP = new Set((
+  "flag pass when content rule rules visible visibly depict depicts depicted depicting " +
+  "show shows shown showing exposed exposing exposure visual visually any all of in on " +
+  "with by from at the and or for to is are be been it this that these those as if but " +
+  "scope policy criteria condition conditions intent context contextual one two three"
+).split(/\s+/).filter(Boolean));
+
+function _filterTriggerTokens(tokens) {
+  return tokens.filter(t => t.length >= 3 && !NSA_TRIGGER_STOP.has(t) && !STOPWORDS.has(t));
+}
+
+// Extract a small trigger_signals set per rule.
+//   • rule_name beyond the rule code (e.g., "AN.L1.A — Genitalia of all genders, visual depiction")
+//     → tokens AFTER the em-dash / hyphen.
+//   • plain_rule_text → first sentence (FLAG/PASS condition body).
+function _extractTriggerSignals(r) {
+  const name = r.rule_name || "";
+  const namePart = (name.split(/\s[—\-]\s/)[1] || name);
+  const ruleText = (r.rule_text || "").slice(0, 220);
+  const firstSentence = (ruleText.split(/[.;\n]/)[0] || "").trim();
+  const combined = (namePart + " " + firstSentence).toLowerCase();
+  const toks = _filterTriggerTokens(tokenize(combined));
+  return new Set(toks);
+}
+
+// Build a BM25 index over a (scoped) rule set.
+function buildRuleIndex(rules) {
+  const docs = (rules || []).map(r => {
+    const fields = {};
+    let totalLen = 0;
+    for (const f of Object.keys(RULE_FIELD_WEIGHTS)) {
+      const toks = tokenize(r[f] || "");
+      fields[f] = toks;
+      totalLen += toks.length;
+    }
+    const triggers = _extractTriggerSignals(r);
+    return { rule: r, fields, len: totalLen, triggers };
+  });
+  const N = docs.length;
+  const df = new Map();
+  for (const d of docs) {
+    const seen = new Set();
+    for (const f of Object.keys(RULE_FIELD_WEIGHTS)) {
+      for (const t of d.fields[f]) {
+        if (seen.has(t)) continue;
+        seen.add(t);
+        df.set(t, (df.get(t) || 0) + 1);
+      }
+    }
+  }
+  const avgLen = docs.reduce((s, d) => s + d.len, 0) / Math.max(N, 1);
+  return { docs, df, N, avgLen };
+}
+
+function _bm25RuleScore(d, queryTokens, df, N, avgLen) {
+  const k1 = 1.5, b = 0.75;
+  let s = 0;
+  for (const q of queryTokens) {
+    const n_q = df.get(q) || 0;
+    if (!n_q) continue;
+    const idf = Math.log(1 + (N - n_q + 0.5) / (n_q + 0.5));
+    for (const [f, w] of Object.entries(RULE_FIELD_WEIGHTS)) {
+      const toks = d.fields[f];
+      if (!toks || !toks.length) continue;
+      let tf = 0;
+      for (const t of toks) if (t === q) tf++;
+      if (!tf) continue;
+      const denom = tf + k1 * (1 - b + b * (d.len / (avgLen || 1)));
+      s += w * idf * ((tf * (k1 + 1)) / denom);
+    }
+  }
+  return s;
+}
+
+function _triggerHitCount(triggers, queryTokenSet) {
+  let n = 0;
+  for (const t of triggers) if (queryTokenSet.has(t)) n++;
+  return n;
+}
+
+// Patch G — precedent-rule boost.
+const PRECEDENT_RULE_BOOST_WEIGHT = 1.5;
+function buildPrecedentRuleBoost(precedents, topN) {
+  const out = new Map(); // token → weight
+  if (!Array.isArray(precedents) || !precedents.length) return out;
+  const slice = precedents.slice(0, topN || 3);
+  for (let i = 0; i < slice.length; i++) {
+    const p = slice[i];
+    const ra = (p && p.raw && (p.raw.rule_applied || p.raw.rule_name)) || "";
+    if (!ra) continue;
+    const namePart = (String(ra).split(/\s[—\-]\s/)[1] || ra);
+    const toks = _filterTriggerTokens(tokenize(namePart));
+    const w = (slice.length - i) / slice.length;
+    for (const t of toks) out.set(t, (out.get(t) || 0) + w);
+  }
+  return out;
+}
+
+function _precedentBoost(rule, boostMap) {
+  if (!boostMap || !boostMap.size) return 0;
+  const namePart = ((rule.rule_name || "").split(/\s[—\-]\s/)[1] || rule.rule_name || "");
+  const toks = _filterTriggerTokens(tokenize(namePart));
+  let s = 0;
+  for (const t of toks) {
+    const w = boostMap.get(t);
+    if (w) s += w;
+  }
+  return s * PRECEDENT_RULE_BOOST_WEIGHT;
+}
+
 // Backwards-compatible: returns ALL rules scored, sorted by score desc.
 // V3.0 callers should prefer rankCandidateL1 / rankL3 / rankL2 below.
 function rankRules(rules, queryTokens) {
@@ -1020,11 +1155,42 @@ function rankRules(rules, queryTokens) {
 
 // V3.0: candidate slot — top-1 over L1 — Threshold rules only.
 // Returns { top, all } where `all` is the full L1 ranking (used by the disambiguation trigger).
-function rankCandidateL1(rules, queryTokens) {
+//
+// V3.3 changes (Patches A + B + G):
+//   • Field-weighted BM25 with IDF (was: token-presence count).
+//   • Trigger-signal gate: an L1 with 0 trigger_signal hits in the query is
+//     disqualified (score → 0) UNLESS the BM25 score is ≥ HARD_FLOOR (rare —
+//     means the rule body itself overlaps strongly with the candidate).
+//   • Precedent-rule boost: rules whose rule_name shares tokens with the top
+//     precedents' rule_applied get an additive boost (precedents > rulebook).
+//
+// Legacy callers may invoke without the optional args; behaviour falls back
+// to BM25 without precedent boost.
+const L1_HARD_FLOOR = 4.0; // BM25 score above which an L1 may pass even with 0 trigger hits
+function rankCandidateL1(rules, queryTokens, opts) {
+  opts = opts || {};
+  const precedentBoostMap = opts.precedentBoostMap || null;
   const l1 = (rules || []).filter(r => _ruleTypeOf(r) === RULE_TYPE_L1);
   // Legacy rows without rule_type still need to be reachable — fall back to "everything" only when ZERO L1 rules exist in scope.
   const pool = l1.length ? l1 : (rules || []);
-  const scored = pool.map(r => Object.assign({}, r, { score: _bm25LiteScore(r, queryTokens) }));
+  const idx = buildRuleIndex(pool);
+  const qSet = new Set(queryTokens);
+  const scored = idx.docs.map(d => {
+    const bm25 = _bm25RuleScore(d, queryTokens, idx.df, idx.N, idx.avgLen);
+    const triggerHits = _triggerHitCount(d.triggers, qSet);
+    const boost = _precedentBoost(d.rule, precedentBoostMap);
+    // Patch B gate: zero trigger hits AND BM25 below hard floor → disqualified.
+    const gated = (triggerHits === 0 && bm25 < L1_HARD_FLOOR);
+    const score = gated ? 0 : bm25 + boost;
+    return Object.assign({}, d.rule, {
+      score,
+      _bm25: bm25,
+      _trigger_hits: triggerHits,
+      _precedent_boost: boost,
+      _gated: gated,
+      _trigger_signals: Array.from(d.triggers).slice(0, 12),
+    });
+  });
   scored.sort((a, b) => b.score - a.score);
   const top = (scored[0] && scored[0].score > 0) ? scored[0] : null;
   return { top, all: scored, isLegacyFallback: !l1.length };
@@ -1666,11 +1832,38 @@ function ReasonedVerdict({ v }) {
                 )
               )))
           )
-        : (v.applied_rule && h("dl", { className: "dl-stack" },
-            h("dt", null, "applied rule"), h("dd", null, v.applied_rule),
-            v.rule_rationale && h("dt", null, "rationale"),
-            v.rule_rationale && h("dd", null, v.rule_rationale),
-          )),
+        : (v.applied_rule && (typeof v.applied_rule === "object"
+            // V3.2: nsa-precedent-review v3.2+ emits applied_rule as object with trigger_status.
+            ? (function() {
+                const ar = v.applied_rule;
+                const ts = (ar.trigger_status || "").toLowerCase();
+                const tsMap = {
+                  "met": { kind: "flag", label: "TRIGGERED" },
+                  "partially_met": { kind: "sim", label: "PARTIALLY MET" },
+                  "not_met": { kind: "pass", label: "NOT TRIGGERED" },
+                  "matched_pass_example": { kind: "pass", label: "PASS EXAMPLE MATCHED" },
+                  "gated_out": { kind: "pass", label: "GATED OUT" },
+                  "not_evaluated": { kind: "sim", label: "NOT EVALUATED" }
+                };
+                const tsBadge = tsMap[ts];
+                return h("div", { style: { marginTop: 4, marginBottom: 8 } },
+                  h("div", { className: "muted mono", style: { marginBottom: 4 } }, "APPLIED RULE"),
+                  h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" } },
+                    ar.rule_type && h(Tag, { kind: "sim" },
+                      String(ar.rule_type).replace(" — ", " ")),
+                    tsBadge && h(Tag, { kind: tsBadge.kind }, tsBadge.label),
+                    ar.tier_version && h("span", { className: "muted mono", style: { fontSize: "var(--fs-mono)" } },
+                      ar.tier_version)
+                  ),
+                  h("div", { className: "mono", style: { marginTop: 4, fontSize: "var(--fs-mono)" } },
+                    ar.rule_name || ar.rule_id || "—")
+                );
+              })()
+            : h("dl", { className: "dl-stack" },
+                h("dt", null, "applied rule"), h("dd", null, v.applied_rule),
+                v.rule_rationale && h("dt", null, "rationale"),
+                v.rule_rationale && h("dd", null, v.rule_rationale),
+              ))),
 
       // V3.0: structured policy_gap dots
       gap && _gapDots(gap),
@@ -1751,7 +1944,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.2.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.3.0")),
     );
   }
   if (corpusError) {
@@ -1762,7 +1955,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.2.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.3.0")),
     );
   }
   if (!corpus) return null;
@@ -1867,14 +2060,16 @@ function MainApp({ corpus, onReloadCorpus }) {
         // For L3 rules, the tag is in policy_titles[] (multi); for L1/L2, in policy_title (scalar).
         (!inputs.title || r.policy_title === inputs.title || (Array.isArray(r.policy_titles) && r.policy_titles.indexOf(inputs.title) !== -1))
       );
-      const { top: topL1, all: l1Ranking, isLegacyFallback } = rankCandidateL1(scopedRules, qtok);
+      const { top: topL1, all: l1Ranking, isLegacyFallback } = rankCandidateL1(scopedRules, qtok, {
+        precedentBoostMap: buildPrecedentRuleBoost(ranked, 3),
+      });
       const candidatePolicy = topL1 ? topL1.policy_title : null;
       const disambiguation = findDisambiguationCandidates(scopedRules, l1Ranking);
       const exceptionRules = findExceptionCandidates(scopedRules, candidatePolicy, queryText);
 
       try {
-        console.log("[CaseReview] V3.0 retrieval:",
-          "L1=" + (topL1 ? topL1.rule_name : "—") + (isLegacyFallback ? " (legacy fallback)" : ""),
+        console.log("[CaseReview] V3.3 retrieval:",
+          "L1=" + (topL1 ? (topL1.rule_name + " score=" + topL1.score.toFixed(2) + " bm25=" + (topL1._bm25||0).toFixed(2) + " hits=" + (topL1._trigger_hits||0) + " boost=" + (topL1._precedent_boost||0).toFixed(2)) : "—") + (isLegacyFallback ? " (legacy fallback)" : ""),
           "L3=" + disambiguation.length,
           "L2=" + exceptionRules.length);
       } catch(_) {}
@@ -1947,7 +2142,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.2.0"),
+      "build V3.3.0"),
   );
 
   // ---- Views ----
@@ -2116,7 +2311,33 @@ function CaseView({
 
       h(Section, { title: "Top rule", defaultOpen: false },
         result.topRule
-          ? h(RuleCard, { rule: result.topRule })
+          ? h(React.Fragment, null,
+              // V3.3 Patch D — low-confidence banner. The retriever's score is shown
+              // alongside a quality verdict so reviewers know when to manually re-pick.
+              (function(){
+                const tr = result.topRule || {};
+                const score = typeof tr.score === "number" ? tr.score : 0;
+                const hits = tr._trigger_hits || 0;
+                let kind, label, msg;
+                if (score >= 8 && hits >= 1) {
+                  kind = "pass"; label = "STRONG MATCH"; msg = "Retriever confidence high — proceed.";
+                } else if (score >= 4 && hits >= 1) {
+                  kind = "sim"; label = "MODERATE MATCH"; msg = "Retriever confidence moderate — verify the rule before sending.";
+                } else if (score > 0) {
+                  kind = "flag"; label = "WEAK MATCH"; msg = "Retriever score is low (" + score.toFixed(2) + ", " + hits + " trigger hit" + (hits===1?"":"s") + "). Consider manually picking the candidate rule, or expect the reviewer to escalate.";
+                } else {
+                  kind = "flag"; label = "NO MATCH"; msg = "No L1 rule cleared the trigger gate. The skill will fall back to its embedded rulebook with confidence capped at 6.";
+                }
+                return h("div", { className: "card", style: { padding: 8, marginBottom: 8, display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" } },
+                  h(Tag, { kind }, label),
+                  h("span", { style: { flex: 1, minWidth: 200 } }, msg),
+                  h("span", { className: "muted mono", style: { fontSize: "var(--fs-mono)" } },
+                    "score " + score.toFixed(2) + " · bm25 " + ((tr._bm25||0).toFixed(2)) + " · trig " + hits + " · prec+" + ((tr._precedent_boost||0).toFixed(2))
+                  )
+                );
+              })(),
+              h(RuleCard, { rule: result.topRule })
+            )
           : h("div", { className: "muted" }, "No rule matched — possible policy gap."),
       ),
 
@@ -2185,7 +2406,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.2.0"); };
+  const copyStamp = () => { safeCopy("V3.3.0"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2194,7 +2415,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.2.0")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.3.0")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
