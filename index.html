@@ -785,78 +785,59 @@ async function loadCorpusFromBitable() {
       asr_text: get(f, pendingIdx, "asr_text"),
       ocr_text: get(f, pendingIdx, "ocr_text"),
       caption_text: get(f, pendingIdx, "caption_text"),
-      image_urls: (function(){
-        // V2.6.0: Prefer attachment field (image_attachments). Lark SDK returns
-        // [{token,name,type,size,url,tmpUrl}, ...] with short-lived signed *.feishu.cn URLs
-        // that bypass ibyteimg origin/referer restrictions. Falls back to legacy image_urls
-        // text field for un-migrated rows.
-        var att = readCell(f, pendingIdx, "keyframes");
-        if (Array.isArray(att) && att.length) {
-          var attUrls = att
-            .map(function(a){ return a && (a.url || a.tmpUrl || a.tmp_url || a.link) || ""; })
-            .filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
-          if (attUrls.length) {
-            try { console.log("[CaseReview] keyframes hit for", get(f, pendingIdx, "source_video_id"), ":", attUrls.length, "files"); } catch(_){}
-            return attUrls;
-          }
-        }
-        var raw = readCell(f, pendingIdx, "image_urls");
-        var out = [];
-        var pushAll = function(arr){ if (Array.isArray(arr)) arr.forEach(function(x){ if (x != null) out.push(x); }); };
-        if (raw == null) { /* empty */ }
-        else if (Array.isArray(raw)) {
-          pushAll(raw.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.name||x.link||x.url)) || ""; }));
-        } else if (typeof raw === "object") {
-          var t0 = raw.text || raw.name || raw.link || raw.url;
-          if (t0) out.push(String(t0));
-        } else {
-          var str = String(raw).trim();
-          if (str) {
-            var consumed = false;
-            // 1) JSON parse (handles '["url1","url2"]' with \u0026 encoded ampersands)
-            if (str.charAt(0) === "[" || str.charAt(0) === "{") {
-              try {
-                var parsed = JSON.parse(str);
-                if (Array.isArray(parsed)) {
-                  pushAll(parsed.map(function(x){ return (typeof x === "string") ? x : (x && (x.text||x.url||x.link)) || ""; }));
-                  consumed = true;
-                } else if (parsed && typeof parsed === "object") {
-                  var tv = parsed.text || parsed.url || parsed.link;
-                  if (tv) { out.push(String(tv)); consumed = true; }
-                }
-              } catch (e) { /* fall through */ }
-            }
-            // 2) Regex-extract every http(s):// URL — also runs as fallback when JSON.parse fails on truncated input
-            if (!consumed) {
-              // Decode \u0026 -> & and similar before regex
-              var decoded = str.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
-              var matches = decoded.match(/https?:\/\/[^\s,;"\'<>\[\]\\]+/g);
-              if (matches && matches.length) {
-                // Bitable text cells truncate at ~50k chars. If JSON.parse failed, the last URL is likely truncated.
-                // Drop trailing URLs that look incomplete: missing x-signature or ending with stray % / & (signature truncated).
-                var jsonFailed = (str.charAt(0) === "[" || str.charAt(0) === "{");
-                if (jsonFailed && matches.length > 0) {
-                  var last = matches[matches.length - 1];
-                  var looksTruncated = !/x-signature=[^&\s]+/.test(last) || /[%&]$/.test(last) || /%[0-9A-Fa-f]?$/.test(last);
-                  if (looksTruncated) {
-                    try { console.warn("[CaseReview] dropping truncated trailing URL:", last.slice(-60)); } catch(_){}
-                    matches = matches.slice(0, -1);
-                  }
-                }
-                pushAll(matches);
+      // V3.3.1: image_urls populated post-map by async getAttachmentUrls(). Empty here.
+      image_urls: [],
+    };
+  }).filter(p => p.source_video_id);
+
+  // V3.3.1: Resolve "keyframes" attachment field via SDK getAttachmentUrls(recordId).
+  // The Bitable JS SDK returns signed *.feishu.cn temp URLs that bypass ibyteimg referer
+  // restrictions. We do this AFTER the sync .map() so each record gets fresh URLs.
+  // No legacy image_urls fallback — if keyframes is empty, the case has no images.
+  if (pendingTbl && pending.length) {
+    var keyframesFieldId = pendingIdx && pendingIdx.byName ? pendingIdx.byName["keyframes"] : null;
+    if (!keyframesFieldId) {
+      console.warn("[CaseReview] V3.3.1: 'keyframes' field NOT FOUND in Pending Cases table. Available:",
+        pendingIdx && pendingIdx.byName ? Object.keys(pendingIdx.byName) : "(no index)");
+    } else {
+      try {
+        var kfField = await pendingTbl.getField(keyframesFieldId);
+        // Concurrency-capped resolution: 6 records in flight at a time.
+        var CONC = 6;
+        var queue = pending.slice();
+        var resolved = 0;
+        var failed = 0;
+        async function worker() {
+          while (queue.length) {
+            var p = queue.shift();
+            try {
+              var urls = await kfField.getAttachmentUrls(p.record_id);
+              if (Array.isArray(urls) && urls.length) {
+                p.image_urls = urls.filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); });
+                if (p.image_urls.length) resolved++;
+              }
+            } catch (e) {
+              failed++;
+              if (failed <= 3) {
+                try { console.warn("[CaseReview] V3.3.1 getAttachmentUrls failed for", p.source_video_id, ":", e && e.message); } catch(_){}
               }
             }
           }
         }
-        // STRICT FILTER: only keep absolute http(s) URLs — no fragments, no relative paths
-        var clean = out
-          .map(function(u){ return (typeof u === "string") ? u.trim() : ""; })
-          .filter(function(u){ return /^https?:\/\//i.test(u); });
-        try { var _svid = get(f, pendingIdx, "source_video_id"); var _rawPrev = (typeof raw === "string") ? raw.slice(0,180) : (raw==null?"<null>":JSON.stringify(raw).slice(0,180)); console.log("[CaseReview] image_urls parsed for", _svid, ":", clean.length, "URLs; sample:", clean.slice(0,2), "; raw type:", (raw==null?"null":(Array.isArray(raw)?"array":typeof raw)), "; raw preview:", _rawPrev); } catch(e) { try { console.warn("[CaseReview] image_urls log failed:", e && e.message); } catch(_){} }
-        return clean;
-      })(),
-    };
-  }).filter(p => p.source_video_id);
+        var workers = [];
+        for (var w = 0; w < CONC; w++) workers.push(worker());
+        await Promise.all(workers);
+        try {
+          var withImg = pending.filter(function(p){ return p.image_urls && p.image_urls.length; }).length;
+          console.log("[CaseReview] V3.3.1 keyframes resolved:", resolved, "records with URLs;",
+            withImg, "/", pending.length, "have ≥1 keyframe; failed:", failed);
+        } catch(_){}
+      } catch (e) {
+        console.warn("[CaseReview] V3.3.1: getField(keyframes) failed —", e && e.message);
+      }
+    }
+  }
+
 
   // Distinct facets for filter dropdowns
   const issuesSet = new Set();
@@ -1944,7 +1925,7 @@ function App() {
     return h("div", { className: "shell" },
       h("div", { className: "shell-header" }, h("div", { className: "title" }, "Case Review")),
       h("div", { className: "shell-body" }, h("div", { className: "muted", style: { padding: 8 } }, "Loading corpus from Base…")),
-      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.3.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "loading…"), h("span", { className: "stamp" }, "build V3.3.1")),
     );
   }
   if (corpusError) {
@@ -1955,7 +1936,7 @@ function App() {
         h("div", { className: "hint" }, "Open this plugin from inside a Base whose tables match the configured names."),
         h("button", { className: "secondary", onClick: reload, style: { marginTop: 12 } }, "Retry"),
       ),
-      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.3.0")),
+      h("div", { className: "shell-footer" }, h("span", null, "error"), h("span", { className: "stamp" }, "build V3.3.1")),
     );
   }
   if (!corpus) return null;
@@ -2142,7 +2123,7 @@ function MainApp({ corpus, onReloadCorpus }) {
       "cases ", stats.cases, " · rules ", stats.rules,
       stats.pending != null ? " · pending " + stats.pending : ""),
     h("span", { className: "stamp", onClick: () => setView("diagnostics"), title: "Open diagnostics" },
-      "build V3.3.0"),
+      "build V3.3.1"),
   );
 
   // ---- Views ----
@@ -2406,7 +2387,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
     const pad = (n) => (n < 10 ? "0" : "") + n;
     return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   };
-  const copyStamp = () => { safeCopy("V3.3.0"); };
+  const copyStamp = () => { safeCopy("V3.3.1"); };
   const samplePending = (corpus.pending || []).slice(0, 5).map(p => ({
     source_video_id: p.source_video_id || "",
     issue: p.issue || "",
@@ -2415,7 +2396,7 @@ function DiagnosticsView({ stats, corpus, verbose, setVerbose, onReloadCorpus })
   return h(React.Fragment, null,
     h(Section, { title: "Build", defaultOpen: true },
       h("dl", { className: "dl-stack" },
-        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.3.0")),
+        h("dt", null, "version"), h("dd", null, h("span", { className: "mono", style: { cursor: "pointer" }, onClick: copyStamp, title: "Copy" }, "V3.3.1")),
         h("dt", null, "host"), h("dd", { className: "mono" }, location.host || "(none)"),
         h("dt", null, "pathname"), h("dd", { className: "mono" }, location.pathname || "/"),
       ),
